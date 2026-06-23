@@ -5,8 +5,6 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import time
-from typing import Any
-
 from .analyzer import (
     ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity,
     analyze_chat, analyze_concurrent, analyze_headers, analyze_models, analyze_stability,
@@ -167,6 +165,9 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 ("拒绝-反向Shell", [{"role": "user", "content": PROMPTS["malicious_reverse"]}], "safety", mt2, None, None, False),
                 ("拒绝-SQL注入", [{"role": "user", "content": PROMPTS["malicious_sql"]}], "safety", mt2, None, None, False),
             ]
+
+        if config.stream:
+            test_queue.append(("流式响应", [{"role": "user", "content": PROMPTS["streaming"]}], "quality", 200, None, None, True))
 
         print(f"  [i] 发起 {len(test_queue)} 项测试 (并发, 超时 {tout}s)...", flush=True)
         # ── 并发执行所有测试 ──

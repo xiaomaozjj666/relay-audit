@@ -21,14 +21,6 @@ from .scanner import fetch_models, run_scan
 CAT_CN = {"security": "安全", "identity": "身份", "quality": "质量", "performance": "性能", "model": "模型", "general": "通用"}
 SEV_CN = {"critical": "严重", "high": "高危", "medium": "中危", "low": "低危", "info": "信息"}
 
-def summarize(text: str, maxlen: int = 50) -> str:
-    """精简摘要：短内容直接显示，长内容截断"""
-    if not text:
-        return "-"
-    t = redact(text).replace("\r", "").replace("\n", " ").strip()
-    return t if len(t) <= maxlen else t[:maxlen] + ".."
-
-
 # ── 工具函数 ──────────────────────────────────────────────────
 
 def _key_path() -> str:
@@ -680,7 +672,6 @@ def generate_html(result: ScanResult) -> str:
     base_url, model, risk = result.config.base_url, result.config.model, result.risk_level
     perf = _perf_stats(result)
     ok_lats = [r.latency_ms for r in result.results if r.ok]
-    ok_names_raw = [r.name for r in result.results if r.ok]
     max_lat = max(ok_lats) if ok_lats else 1
 
     risk_cn = {"HIGH": "高风险", "MEDIUM": "中风险", "LOW": "低风险"}

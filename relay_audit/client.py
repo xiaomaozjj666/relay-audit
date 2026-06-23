@@ -134,7 +134,7 @@ class ApiClient:
                 lat = time.perf_counter() - t0
                 return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e))
 
-        return ChatResult("", model, False, 99999, 0, "", "", {}, "", 0, "max retries")
+        return ChatResult("", model, False, int((time.perf_counter() - t0) * 1000), 0, "", "", {}, "", 0, "max retries")
 
     async def chat_stream(
         self,
