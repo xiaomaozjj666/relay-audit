@@ -155,9 +155,8 @@ class ApiClient:
         usage = {}
         status = 0
         try:
-            async with asyncio.timeout(timeout):
-                async with self._client.stream("POST", self.base + "/v1/chat/completions", content=data) as r:
-                    status = r.status_code
+            async with self._client.stream("POST", self.base + "/v1/chat/completions", content=data, timeout=timeout) as r:
+                status = r.status_code
                     async for line in r.aiter_lines():
                         line = line.strip()
                         if not line.startswith("data: "):

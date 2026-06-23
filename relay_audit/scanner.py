@@ -102,7 +102,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
     results: list[ChatResult] = []
     models: list[ModelInfo] = []
     raw_headers: dict[str, str] = {}
-    started_at = dt.datetime.now(dt.UTC).isoformat()
+    started_at = dt.datetime.now(dt.timezone.utc).isoformat()
     t0_all = time.perf_counter()
 
     async with ApiClient(config.base_url, key, config.timeout) as client:

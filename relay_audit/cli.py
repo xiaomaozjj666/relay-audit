@@ -33,15 +33,21 @@ def _load_key_from_file() -> str:
         try:
             with open(kf, "r", encoding="utf-8") as f:
                 return f.read().strip()
-        except Exception:
+        except OSError:
             pass
     return ""
 
 
 def _save_key_to_file(key: str) -> None:
-    with open(_key_path(), "w", encoding="utf-8") as f:
+    kf = _key_path()
+    with open(kf, "w", encoding="utf-8") as f:
         f.write(key)
-    print(f"  [v] 已保存到 {_key_path()}")
+    # 限制文件权限（仅 Linux/macOS）
+    try:
+        os.chmod(kf, 0o600)
+    except Exception:
+        pass
+    print(f"  [v] 已保存到 {kf}")
 
 
 def _delete_key_file() -> None:
@@ -196,8 +202,8 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     if not config.no_html:
         try:
             report_path = save_report(result, config.output)
-        except Exception:
-            pass
+        except Exception as _rpt_err:
+            print(f"  [w] 报告保存失败: {_rpt_err}", file=sys.stderr)
 
     if config.json_output:
         print_json(result)
