@@ -183,16 +183,18 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             test_queue.append(TestCase("流式响应", [{"role": "user", "content": PROMPTS["streaming"]}], max_tokens=200, stream=True))
 
         print(f"  [i] 发起 {len(test_queue)} 项测试 (并发, 超时 {tout}s)...", flush=True)
-        # ── 并发执行所有测试 ──
+        # ── 并发执行所有测试（最多 5 个并发，避免触发限流） ──
+        _sem = asyncio.Semaphore(5)
         async def _run_test(tc: TestCase):
-            if tc.stream:
-                r = await client.chat_stream(config.model, tc.messages, max_tokens=tc.max_tokens, request_timeout=tout)
-                r.turn_count = 3
-            else:
-                r = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
-                                      response_format=tc.response_format, tools=tc.tools, request_timeout=tout)
-            r.name = tc.name
-            return r, tc.kind
+            async with _sem:
+                if tc.stream:
+                    r = await client.chat_stream(config.model, tc.messages, max_tokens=tc.max_tokens, request_timeout=tout)
+                    r.turn_count = 3
+                else:
+                    r = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
+                                          response_format=tc.response_format, tools=tc.tools, request_timeout=tout)
+                r.name = tc.name
+                return r, tc.kind
 
         chat_tasks = [_run_test(t) for t in test_queue]
         chat_results = await asyncio.gather(*chat_tasks, return_exceptions=True)
