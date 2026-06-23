@@ -185,20 +185,26 @@ async def run_scan(config: ScanConfig) -> ScanResult:
         mt2 = 60 if config.quick else 200
         tout = 8 if config.quick else 20  # 单请求超时
 
+        # ── 基础测试（纯文本，所有模型都应支持） ──
         test_queue: list[TestCase] = [
+            TestCase("基础对话", [{"role": "user", "content": "只输出OK"}], max_tokens=10),
             TestCase("身份识别", [{"role": "user", "content": PROMPTS["identity"]}], kind="identity", max_tokens=mt2),
             TestCase("指令遵循", [{"role": "user", "content": PROMPTS["instruction"]}], max_tokens=30),
             TestCase("知识探针", [{"role": "user", "content": PROMPTS["knowledge_cutoff"]}], kind="identity", max_tokens=mt2),
             TestCase("模型指纹", [{"role": "user", "content": PROMPTS["fingerprint"]}], kind="identity", max_tokens=mt2),
             TestCase("Prompt隔离", [{"role": "user", "content": PROMPTS["canary_inject"]}], kind="safety", max_tokens=100),
-            TestCase("JSON 模式", [{"role": "user", "content": PROMPTS["json_mode"]}], max_tokens=150, response_format={"type": "json_object"}),
             TestCase("多轮对话", [
                 {"role": "user", "content": PROMPTS["multi_turn_q1"]},
                 {"role": "assistant", "content": PROMPTS["multi_turn_a1"]},
                 {"role": "user", "content": PROMPTS["multi_turn_q2"]},
             ], max_tokens=100),
+        ]
+        # ── 高级测试（部分模型可能不支持，失败会自动降级） ──
+        adv_queue: list[TestCase] = [
+            TestCase("JSON 模式", [{"role": "user", "content": PROMPTS["json_mode"]}], max_tokens=150, response_format={"type": "json_object"}),
             TestCase("Function Calling", [{"role": "user", "content": PROMPTS["function_calling"]}], max_tokens=200, tools=FUNCTION_CALLING_TOOLS),
         ]
+
         if not config.skip_safety:
             test_queue += [
                 TestCase("拒绝-破坏性", [{"role": "user", "content": PROMPTS["destructive_safety"]}], kind="safety", max_tokens=mt2),
@@ -214,35 +220,73 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             ]
 
         if config.stream:
-            test_queue.append(TestCase("流式响应", [{"role": "user", "content": PROMPTS["streaming"]}], max_tokens=200, stream=True))
+            adv_queue.append(TestCase("流式响应", [{"role": "user", "content": PROMPTS["streaming"]}], max_tokens=200, stream=True))
 
-        print(f"  [i] 发起 {len(test_queue)} 项测试 (并发, 超时 {tout}s)...", flush=True)
+        all_tests = test_queue + adv_queue
+        print(f"  [i] 发起 {len(all_tests)} 项测试 ({len(test_queue)} 基础 + {len(adv_queue)} 高级, 超时 {tout}s)...", flush=True)
+
         # ── 并发执行所有测试（最多 5 个并发，避免触发限流） ──
         _sem = asyncio.Semaphore(5)
-        async def _run_test(tc: TestCase):
-            async with _sem:
-                if tc.stream:
-                    r = await client.chat_stream(config.model, tc.messages, max_tokens=tc.max_tokens, request_timeout=tout)
-                    r.turn_count = 3
-                else:
-                    r = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
-                                          response_format=tc.response_format, tools=tc.tools, request_timeout=tout)
-                r.name = tc.name
-                return r, tc.kind
 
-        chat_tasks = [_run_test(t) for t in test_queue]
-        chat_results = await asyncio.gather(*chat_tasks, return_exceptions=True)
-        done = sum(1 for r in chat_results if isinstance(r, tuple))
-        fail = sum(1 for r in chat_results if isinstance(r, BaseException))
-        print(f"  [i] 测试完成: {done} 成功, {fail} 失败", flush=True)
+        async def _run_with_fallback(tc: TestCase) -> list[tuple[ChatResult, str]]:
+            """执行测试，高级功能失败时自动降级为纯文本。返回 [(result, kind), ...]"""
+            async with _sem:
+                results_list: list[tuple[ChatResult, str]] = []
+
+                # 第一次尝试（带全部参数）
+                r = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
+                                      response_format=tc.response_format, tools=tc.tools, request_timeout=tout)
+                r.name = tc.name
+                results_list.append((r, tc.kind))
+
+                # JSON 模式失败 → 降级为纯文本重试
+                if tc.response_format and not r.ok:
+                    r2 = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
+                                           request_timeout=tout)
+                    r2.name = f"{tc.name}(纯文本降级)"
+                    if r2.ok:
+                        results_list.append((r2, tc.kind))
+                        findings.append(Finding(Severity.INFO, f"{tc.name} 不兼容 JSON 模式",
+                                                "已降级为纯文本测试且成功", tc.kind))
+
+                # Function Calling 失败 → 降级为纯文本重试
+                if tc.tools and not r.ok:
+                    r2 = await client.chat(config.model, tc.messages, temperature=0, max_tokens=tc.max_tokens,
+                                           request_timeout=tout)
+                    r2.name = f"{tc.name}(纯文本降级)"
+                    if r2.ok:
+                        results_list.append((r2, tc.kind))
+                        findings.append(Finding(Severity.INFO, f"{tc.name} 不兼容 Function Calling",
+                                                "已降级为纯文本测试且成功", tc.kind))
+
+                return results_list
+
+        # ── 执行所有测试 ──
+        all_tasks = [_run_with_fallback(t) for t in test_queue]
+        if not config.quick:
+            all_tasks += [_run_with_fallback(t) for t in adv_queue]
+        chat_results = await asyncio.gather(*all_tasks, return_exceptions=True)
+
+        # 流式测试（单独处理）
+        if config.stream:
+            try:
+                sr = await client.chat_stream(config.model, [{"role": "user", "content": PROMPTS["streaming"]}],
+                                              max_tokens=200, request_timeout=tout)
+                sr.name = "流式响应"
+                sr.turn_count = 3
+                results.append(sr)
+                findings.extend(analyze_chat(sr, "quality"))
+            except Exception as e:
+                results.append(ChatResult("流式响应", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)))
+
         for item in chat_results:
             if isinstance(item, BaseException):
                 results.append(ChatResult("异常", config.model, False, 0, 0, "", str(item), {}, "", 0, str(item)))
                 findings.append(Finding(Severity.MEDIUM, "测试异常中断", str(item)[:200], "quality"))
                 continue
-            r, kind = item
-            results.append(r)
-            findings.extend(analyze_chat(r, kind))
+            for r, kind in item:
+                results.append(r)
+                findings.extend(analyze_chat(r, kind))
 
         # 错误模式分析：检测大量相同错误（中转站不兼容/配置错误）
         findings.extend(analyze_error_pattern(results, config.model))
