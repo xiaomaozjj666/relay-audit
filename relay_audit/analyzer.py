@@ -334,6 +334,82 @@ def analyze_models(models: list[ModelInfo]) -> list[Finding]:
     return fs
 
 
+def analyze_model_swap(requested_model: str, models: list[ModelInfo]) -> list[Finding]:
+    """检测中转站是否偷换模型 — 对比请求模型与模型列表"""
+    fs: list[Finding] = []
+    if not requested_model or not models:
+        return fs
+    ids = [m.id for m in models]
+    if not ids:
+        return fs
+
+    req_lower = requested_model.lower()
+    # 1. 请求的模型是否在列表中？
+    exact_match = any(req_lower == m_id.lower() for m_id in ids)
+    partial_match = any(req_lower in m_id.lower() for m_id in ids)
+
+    if not exact_match and partial_match:
+        fs.append(Finding(Severity.MEDIUM, "模型名模糊匹配",
+                          f"请求={requested_model}, 列表中有相似名: {[m for m in ids if req_lower in m.lower()][:3]}",
+                          "identity", "请求的模型名未精确匹配，中转可能使用了自定义别名"))
+    elif not exact_match and not partial_match:
+        # 请求的模型完全不在列表中 — 中转肯定在偷换
+        # 看看列表里都是什么模型
+        present_families = set()
+        for fam in KNOWN_FAMILIES:
+            if any(fam in m.lower() for m in ids):
+                present_families.add(fam)
+        detail = f"请求 {requested_model} 但 API 列表中没有此模型"
+        if present_families:
+            detail += f"。可用模型系列: {', '.join(sorted(present_families))}"
+        fs.append(Finding(Severity.HIGH, "模型不存在于 API 列表 — 疑似偷换",
+                          detail, "identity",
+                          "请求的模型不在 API 的模型列表中，中转一定在路由到其他模型"))
+    return fs
+
+
+def analyze_error_pattern(results: list[ChatResult], config_model: str) -> list[Finding]:
+    """分析测试结果中的错误模式 — 检测中转站批量失败"""
+    fs: list[Finding] = []
+    if not results:
+        return fs
+
+    failed = [r for r in results if not r.ok]
+    if len(failed) < 3:
+        return fs
+
+    # 检查是否所有失败都有相同的错误消息
+    error_msgs: dict[str, int] = {}
+    for r in failed:
+        err = (r.error or r.content)[:100]
+        if err:
+            error_msgs[err] = error_msgs.get(err, 0) + 1
+
+    if error_msgs:
+        most_common = max(error_msgs.items(), key=lambda x: x[1])
+        # 如果 80%+ 的失败都是同一个错误
+        if most_common[1] >= len(failed) * 0.8 and most_common[1] >= 3:
+            err_sample = most_common[0][:150]
+            fs.append(Finding(Severity.HIGH, "大量测试返回相同错误 — 中转站可能异常",
+                              f"{most_common[1]}/{len(failed)} 项测试返回同类型错误: {err_sample}",
+                              "quality",
+                              "中转站对所有请求返回相同错误，不兼容或配置错误"))
+
+            # 进一步判断错误类型
+            err_lower = err_sample.lower()
+            if "function" in err_lower or "tool" in err_lower:
+                fs.append(Finding(Severity.MEDIUM, "错误涉及函数/工具调用",
+                                  "中转站或目标模型可能不支持 tool calling 功能", "quality"))
+            if "model" in err_lower and "not" in err_lower:
+                fs.append(Finding(Severity.HIGH, "模型不存在错误",
+                                  '中转站返回"模型不存在"，请求的模型名可能不对或未开通', "identity"))
+            if "rate" in err_lower or "limit" in err_lower or "quota" in err_lower:
+                fs.append(Finding(Severity.MEDIUM, "触发速率限制或配额不足",
+                                  "中转站返回限流/配额错误", "performance"))
+
+    return fs
+
+
 # ═══════════════════════════════════════════════════════════════
 # 响应头分析
 # ═══════════════════════════════════════════════════════════════

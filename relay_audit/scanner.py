@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from .analyzer import (
     ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity,
     analyze_chat, analyze_concurrent, analyze_headers, analyze_models, analyze_stability,
+    analyze_model_swap, analyze_error_pattern, short,
 )
 from .client import ApiClient
 
@@ -145,8 +146,41 @@ async def run_scan(config: ScanConfig) -> ScanResult:
         if raw_headers:
             findings.extend(analyze_headers(raw_headers))
 
+        # 模型偷换检测：请求的模型是否在 API 列表中？
+        if config.model:
+            findings.extend(analyze_model_swap(config.model, models))
+
         # ──────────────────────────────────────────────────────
-        # [2] 构建测试队列（全部并发执行）
+        # [2] 前置健康检查 — 最简单的文字测试，检测 API 是否存活
+        # ──────────────────────────────────────────────────────
+        print("  [i] 前置健康检查...", flush=True)
+        try:
+            ping = await client.chat(config.model, [{"role": "user", "content": "ping"}],
+                                     temperature=0, max_tokens=10, request_timeout=10)
+            ping.name = "前置检查"
+            results.append(ping)
+            if not ping.ok:
+                findings.append(Finding(Severity.HIGH, "API 健康检查失败",
+                                        f"基础文字请求失败: HTTP {ping.status}: {short(ping.error or ping.content, 200)}",
+                                        "quality", "API 连最简单的文字请求都无法正常响应"))
+            else:
+                print(f"   健康检查通过 ({ping.latency_ms}ms)", flush=True)
+                # 如果返回的模型名与请求不一致，标记模型偷换
+                if ping.model_ret and ping.model_ret != config.model and config.model:
+                    findings.append(Finding(Severity.HIGH, "模型偷换 — 基础请求返回不同模型",
+                                            f"请求={config.model}, 返回={ping.model_ret}", "identity",
+                                            "中转站将请求路由到了不同的模型"))
+        except Exception as e:
+            results.append(ChatResult("前置检查", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)))
+            findings.append(Finding(Severity.CRITICAL, "API 完全不可用", str(e)[:200], "quality",
+                                    "中转站完全不可用，无法进行任何测试"))
+            # 如果前置检查就挂了，后面的测试肯定也全挂，跳过完整测试
+            duration = time.perf_counter() - t0_all
+            return ScanResult(config=config, findings=findings, results=results, models=models,
+                              started_at=started_at, duration_s=duration)
+
+        # ──────────────────────────────────────────────────────
+        # [3] 构建测试队列（全部并发执行）
         # ──────────────────────────────────────────────────────
         mt2 = 60 if config.quick else 200
         tout = 8 if config.quick else 20  # 单请求超时
@@ -209,6 +243,9 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             r, kind = item
             results.append(r)
             findings.extend(analyze_chat(r, kind))
+
+        # 错误模式分析：检测大量相同错误（中转站不兼容/配置错误）
+        findings.extend(analyze_error_pattern(results, config.model))
 
         # ──────────────────────────────────────────────────────
         # [3] 稳定性 & 延迟分析（并发采样）
