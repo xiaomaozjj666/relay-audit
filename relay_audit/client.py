@@ -157,29 +157,29 @@ class ApiClient:
         try:
             async with self._client.stream("POST", self.base + "/v1/chat/completions", content=data, timeout=timeout) as r:
                 status = r.status_code
-                    async for line in r.aiter_lines():
-                        line = line.strip()
-                        if not line.startswith("data: "):
-                            continue
-                        chunk = line.removeprefix("data: ")
-                        if chunk == "[DONE]":
-                            continue
-                        try:
-                            obj = json.loads(chunk)
-                        except json.JSONDecodeError:
-                            continue
-                        if not raw_id:
-                            raw_id = obj.get("id", "") or ""
-                        if not created:
-                            created = obj.get("created", 0) or 0
-                        if not model_ret:
-                            model_ret = obj.get("model", "") or ""
-                        for c in (obj.get("choices") or []):
-                            if isinstance(c, dict):
-                                d = c.get("delta", {}) or {}
-                                full_content += d.get("content", "") or ""
-                        if obj.get("usage") and isinstance(obj["usage"], dict):
-                            usage = obj["usage"]
+                async for line in r.aiter_lines():
+                    line = line.strip()
+                    if not line.startswith("data: "):
+                        continue
+                    chunk = line.removeprefix("data: ")
+                    if chunk == "[DONE]":
+                        continue
+                    try:
+                        obj = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    if not raw_id:
+                        raw_id = obj.get("id", "") or ""
+                    if not created:
+                        created = obj.get("created", 0) or 0
+                    if not model_ret:
+                        model_ret = obj.get("model", "") or ""
+                    for c in (obj.get("choices") or []):
+                        if isinstance(c, dict):
+                            d = c.get("delta", {}) or {}
+                            full_content += d.get("content", "") or ""
+                    if obj.get("usage") and isinstance(obj["usage"], dict):
+                        usage = obj["usage"]
         except asyncio.TimeoutError:
             lat = time.perf_counter() - t0
             return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, "stream timeout")
