@@ -1,93 +1,164 @@
-# relay-audit
+# Relay Audit
 
+**OpenAI 兼容中转 API 安全与质量检测工具**
 
+只需提供 API Key 和地址，一键完成中转服务的安全审计、身份验证、质量检测、性能评估。
 
-## Getting started
+## ✨ 功能特性
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- 🔍 **身份验证** — 检测模型偷换、身份伪造、路由不透明
+- 🛡️ **安全审计** — Prompt 隔离测试、危险内容拒答检测、安全边界验证
+- ⚡ **性能测试** — 延迟统计、并发突发、稳定性采样、流式响应支持
+- 📊 **质量检测** — 编码一致性、JSON 模式、Function Calling、多轮对话
+- 📈 **可视化报告** — 精美 HTML 报告、评分仪表盘、问题分类、改进建议
+- 🖥️ **多模式** — 命令行、交互模式、JSON 输出、Web 报告服务器
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## 🚀 快速开始
 
-## Add your files
+### 安装
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+```bash
+pip install relay-audit
+```
+
+或从源码安装：
+
+```bash
+git clone https://gitlab.com/aifge/relay-audit.git
+cd relay-audit
+pip install -e .
+```
+
+### 最简用法
+
+设置环境变量后直接运行（自动选择最强模型）：
+
+```bash
+# Windows
+set RELAY_API_KEY=sk-xxx
+relay-audit --base-url https://api.example.com
+
+# Linux/macOS
+export RELAY_API_KEY=sk-xxx
+relay-audit --base-url https://api.example.com
+```
+
+### 交互模式（零参数启动）
+
+```bash
+relay-audit
+```
+
+按提示输入 Key 和地址，工具会自动获取模型列表并选择最强的 3 个模型并发检测。
+
+## 📖 使用示例
+
+```bash
+# 指定模型检测
+relay-audit --base-url https://api.example.com --model claude-opus-4-6
+
+# 只看模型列表
+relay-audit --base-url https://api.example.com --models
+
+# 快速模式（跳过安全测试）
+relay-audit --quick --base-url https://api.example.com
+
+# 流式响应测试
+relay-audit --stream --base-url https://api.example.com
+
+# 启用 JSON 输出
+relay-audit --json --base-url https://api.example.com
+
+# 保存 Key 到本地以便下次自动读取
+relay-audit --key sk-xxx --save-key
+
+# 对比多个模型
+relay-audit --base-url https://api.example.com --model gpt-4o --compare claude-opus-4-6
+
+# 指定输出报告路径
+relay-audit --base-url https://api.example.com --output report.html
+
+# 启动报告查看服务器（浏览历史扫描结果）
+relay-audit --serve 8080
+```
+
+## 🔧 命令行参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--base-url` | API 端点地址 | 必填 |
+| `--model` | 指定检测模型 | 自动选择 |
+| `--key` | API Key（优先于环境变量） | - |
+| `--api-key-env` | Key 环境变量名 | `RELAY_API_KEY` |
+| `--timeout` | 请求超时秒数 | 60 |
+| `--samples` | 稳定性采样次数 | 3 |
+| `--compare` | 对比模型（可多次使用） | - |
+| `--quick` | 快速模式（跳过安全测试） | `false` |
+| `--stream` | 启用流式响应测试 | `false` |
+| `--json` | 输出 JSON 格式结果 | `false` |
+| `--output` | 报告输出路径 | 自动生成 |
+| `--no-html` | 不生成 HTML 报告 | `false` |
+| `--skip-safety` | 跳过安全测试 | `false` |
+| `--config` | JSON 配置文件路径 | - |
+| `--save-key` | 保存 Key 到本地 | `false` |
+| `--models` | 只展示模型列表 | `false` |
+| `--serve [PORT]` | 启动报告查看服务器 | 8080 |
+
+## 🧪 检测项目
+
+### 6 大检测类别，20+ 检测项
+
+| 类别 | 检测内容 |
+|------|----------|
+| 🔐 **安全** | Prompt 隔离、危险代码拒答、Cookie/勒索/反向Shell/SQL注入/键盘记录器/DDoS/钓鱼检测、系统提示泄露 |
+| 🆔 **身份** | 模型身份匹配、模型偷换检测、知识截止日期验证、模型指纹、模型列表一致性 |
+| 📊 **质量** | 基础对话、指令遵循、编码一致性、JSON 模式、Function Calling、多轮对话、长上下文、Token 计费校验、乱码检测 |
+| ⚡ **性能** | 延迟统计（p50/p95/p99）、并发突发测试、稳定性采样、抖动分析 |
+| 📦 **模型** | 可疑模型名检测、多供应商聚合识别、大小写重复检测 |
+| 🌐 **通用** | 代理/CDN 特征检测、响应头分析、错误模式识别 |
+
+## 📁 项目结构
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/aifge/relay-audit.git
-git branch -M main
-git push -uf origin main
+relay_audit/
+├── __init__.py       # 版本信息
+├── __main__.py       # python -m 入口
+├── cli.py            # 命令行界面 & 报告生成
+├── analyzer.py       # 分析检测逻辑 & 数据类型
+├── client.py         # OpenAI API 异步客户端
+├── scanner.py        # 测试编排与执行
+├── provider.py       # 服务提供商检测
+└── serve.py          # 报告 Web 服务器
 ```
 
-## Integrate with your tools
+## 📝 配置文件
 
-* [Set up project integrations](https://gitlab.com/aifge/relay-audit/-/settings/integrations)
+支持 JSON 配置文件（通过 `--config` 指定）：
 
-## Collaborate with your team
+```json
+{
+  "base_url": "https://api.example.com",
+  "model": "claude-opus-4-6",
+  "timeout": 60,
+  "samples": 3,
+  "quick": false,
+  "stream": false
+}
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## 🏗️ 开发
 
-## Test and Deploy
+```bash
+# 安装开发依赖
+pip install -r requirements-dev.txt
 
-Use the built-in continuous integration in GitLab.
+# 运行测试
+pytest tests/ -v
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+# 本地安装
+pip install -e .
+```
 
-***
+## 📄 许可证
 
-# Editing this README
-
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
-
-## Suggestions for a good README
-
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
-
-## Name
-Choose a self-explaining name for your project.
-
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT License

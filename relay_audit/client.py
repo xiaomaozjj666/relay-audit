@@ -8,10 +8,13 @@ import time
 
 import httpx
 
-from .analyzer import ChatResult, redact, short
+from .models import ChatResult
+from .provider import Provider, detect_provider
 
 
-def _parse_chat_response(model: str, status: int, response: httpx.Response, lat: float) -> ChatResult:
+def _parse_chat_response(
+    model: str, status: int, response: httpx.Response, lat: float
+) -> ChatResult:
     """解析 /v1/chat/completions 响应"""
     content = ""
     model_ret = ""
@@ -38,10 +41,26 @@ def _parse_chat_response(model: str, status: int, response: httpx.Response, lat:
                     content = json.dumps(msg["tool_calls"], ensure_ascii=False)
         if not content:
             err = parsed.get("error", {})
-            content = json.dumps(err, ensure_ascii=False) if isinstance(err, dict) else str(err) if err else ""
-    return ChatResult("", model, 200 <= status < 300, int(lat * 1000), status,
-                      model_ret, content, usage, raw_id, created,
-                      "" if 200 <= status < 300 else f"HTTP {status}")
+            content = (
+                json.dumps(err, ensure_ascii=False)
+                if isinstance(err, dict)
+                else str(err)
+                if err
+                else ""
+            )
+    return ChatResult(
+        "",
+        model,
+        200 <= status < 300,
+        int(lat * 1000),
+        status,
+        model_ret,
+        content,
+        usage,
+        raw_id,
+        created,
+        "" if 200 <= status < 300 else f"HTTP {status}",
+    )
 
 
 class ApiClient:
@@ -54,14 +73,24 @@ class ApiClient:
     - 连接池预热
     """
 
-    def __init__(self, base_url: str, api_key: str, timeout: int = 60):
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: int = 60,
+        provider: Provider | None = None,
+    ):
         self.base = base_url.rstrip("/")
+        # 自动去除末尾的 /v1，避免与请求路径中的 /v1 重复拼接
+        if self.base.endswith("/v1"):
+            self.base = self.base[:-3]
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json",
         }
         self.timeout = timeout
+        self.provider = provider or detect_provider(base_url)
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "ApiClient":
@@ -77,7 +106,6 @@ class ApiClient:
         if self._client:
             await self._client.aclose()
 
-
     async def chat(
         self,
         model: str,
@@ -91,6 +119,7 @@ class ApiClient:
         retry: bool = True,
     ) -> ChatResult:
         """POST /v1/chat/completions，支持请求级超时和可控重试"""
+        assert self._client is not None
         body: dict = {
             "model": model,
             "messages": messages,
@@ -114,7 +143,7 @@ class ApiClient:
         for attempt in range(max_retries + 1):
             try:
                 r = await asyncio.wait_for(
-                    self._client.request("POST", self.base + path, content=data),
+                    self._client.request("POST", path, content=data),
                     timeout=timeout,
                 )
                 lat = time.perf_counter() - t0
@@ -126,15 +155,43 @@ class ApiClient:
             except (asyncio.TimeoutError, httpx.TimeoutException):
                 lat = time.perf_counter() - t0
                 # 超时不重试 — 中转站慢就是慢
-                return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, f"timeout>{timeout}s")
+                return ChatResult(
+                    "",
+                    model,
+                    False,
+                    int(lat * 1000),
+                    0,
+                    "",
+                    "",
+                    {},
+                    "",
+                    0,
+                    f"timeout>{timeout}s",
+                )
             except httpx.HTTPStatusError as e:
                 lat = time.perf_counter() - t0
-                return _parse_chat_response(model, e.response.status_code, e.response, lat)
+                return _parse_chat_response(
+                    model, e.response.status_code, e.response, lat
+                )
             except Exception as e:
                 lat = time.perf_counter() - t0
-                return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e))
+                return ChatResult(
+                    "", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e)
+                )
 
-        return ChatResult("", model, False, int((time.perf_counter() - t0) * 1000), 0, "", "", {}, "", 0, "max retries")
+        return ChatResult(
+            "",
+            model,
+            False,
+            int((time.perf_counter() - t0) * 1000),
+            0,
+            "",
+            "",
+            {},
+            "",
+            0,
+            "max retries",
+        )
 
     async def chat_stream(
         self,
@@ -144,7 +201,14 @@ class ApiClient:
         request_timeout: int | None = None,
     ) -> ChatResult:
         """流式聊天，独立方法"""
-        body = {"model": model, "messages": messages, "temperature": 0, "max_tokens": max_tokens, "stream": True}
+        assert self._client is not None
+        body = {
+            "model": model,
+            "messages": messages,
+            "temperature": 0,
+            "max_tokens": max_tokens,
+            "stream": True,
+        }
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
         t0 = time.perf_counter()
         timeout = request_timeout or self.timeout
@@ -155,7 +219,9 @@ class ApiClient:
         usage = {}
         status = 0
         try:
-            async with self._client.stream("POST", self.base + "/v1/chat/completions", content=data, timeout=timeout) as r:
+            async with self._client.stream(
+                "POST", "/v1/chat/completions", content=data, timeout=timeout
+            ) as r:
                 status = r.status_code
                 async for line in r.aiter_lines():
                     line = line.strip()
@@ -174,7 +240,7 @@ class ApiClient:
                         created = obj.get("created", 0) or 0
                     if not model_ret:
                         model_ret = obj.get("model", "") or ""
-                    for c in (obj.get("choices") or []):
+                    for c in obj.get("choices") or []:
                         if isinstance(c, dict):
                             d = c.get("delta", {}) or {}
                             full_content += d.get("content", "") or ""
@@ -182,25 +248,69 @@ class ApiClient:
                         usage = obj["usage"]
         except asyncio.TimeoutError:
             lat = time.perf_counter() - t0
-            return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, "stream timeout")
+            return ChatResult(
+                "",
+                model,
+                False,
+                int(lat * 1000),
+                0,
+                "",
+                "",
+                {},
+                "",
+                0,
+                "stream timeout",
+            )
         except Exception as e:
             lat = time.perf_counter() - t0
-            return ChatResult("", model, False, int(lat * 1000), status, "", repr(e), {}, "", 0, repr(e))
+            return ChatResult(
+                "",
+                model,
+                False,
+                int(lat * 1000),
+                status,
+                "",
+                repr(e),
+                {},
+                "",
+                0,
+                repr(e),
+            )
         lat = time.perf_counter() - t0
-        return ChatResult("", model, 200 <= status < 300, int(lat * 1000), status, model_ret,
-                          full_content, usage, raw_id, created, "", streaming=True)
+        return ChatResult(
+            "",
+            model,
+            200 <= status < 300,
+            int(lat * 1000),
+            status,
+            model_ret,
+            full_content,
+            usage,
+            raw_id,
+            created,
+            "",
+            streaming=True,
+        )
 
-    async def list_models(self) -> tuple[int, list[dict], dict, float]:
-        """GET /v1/models"""
+    async def list_models(self) -> tuple[int, list[dict], dict, float, dict[str, str]]:
+        """GET /v1/models — 返回 (status, models, parsed_json, latency, headers)"""
+        assert self._client is not None
         t0 = time.perf_counter()
         try:
-            r = await self._client.get(self.base + "/v1/models")
+            r = await self._client.get("/v1/models")
             lat = time.perf_counter() - t0
             parsed = r.json() if r.text else {}
             models = parsed.get("data", []) if isinstance(parsed, dict) else []
-            return r.status_code, models if isinstance(models, list) else [], parsed, lat
+            headers = {k: v for k, v in r.headers.items()}
+            return (
+                r.status_code,
+                models if isinstance(models, list) else [],
+                parsed,
+                lat,
+                headers,
+            )
         except Exception as e:
-            return 0, [], {"error": repr(e)}, time.perf_counter() - t0
+            return 0, [], {"error": repr(e)}, time.perf_counter() - t0, {}
 
     async def concurrent_chat(
         self, n: int, model: str, messages: list[dict], **kwargs
