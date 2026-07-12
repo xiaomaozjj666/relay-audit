@@ -760,4 +760,5 @@ def _clean_old_reports(dir_path: str, days: int = 7) -> None:
                 if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
                     os.remove(fp)
     except Exception:
-        pass
+        import sys
+        print("  [!] 清理旧报告失败", file=sys.stderr)

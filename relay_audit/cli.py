@@ -55,7 +55,7 @@ def _save_key_to_file(key: str) -> None:
             try:
                 os.chmod(kf, stat.S_IREAD | stat.S_IWRITE)
             except Exception:
-                pass
+                print("  [!] 无法设置密钥文件权限", file=sys.stderr)
     else:
         fd = os.open(kf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -74,7 +74,7 @@ def _ensure_utf8() -> None:
         try:
             s.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
         except Exception:
-            pass
+            print("  [!] 无法设置 stdout 编码", file=sys.stderr)
 
 
 # ── 模型自动选择 ──────────────────────────────────────────────
@@ -271,7 +271,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
         try:
             webbrowser.open(Path(report_path).as_uri())
         except Exception:
-            pass
+            print("  [!] 无法打开浏览器", file=sys.stderr)
 
     return 1 if result.high_count else 0, report_path, result
 
@@ -301,6 +301,7 @@ def cmd_list_models(args: argparse.Namespace) -> int:
 
 def interactive() -> int:
     """交互模式 — 只需 Key 和地址，全自动检测"""
+    # 启用 Windows 终端 ANSI/UTF-8 转义码支持（VIRTUAL_TERMINAL_PROCESSING）
     os.system("")  # type: ignore
 
     while True:
@@ -357,7 +358,7 @@ def interactive() -> int:
 
                     persist_result(result, url)
                 except Exception:
-                    pass
+                    print("  [!] 保存扫描结果失败", file=sys.stderr)
                 return model, result
             except Exception as e:
                 print(f"  [x] {model}: 扫描失败 - {e}", file=sys.stderr)
@@ -403,7 +404,7 @@ def interactive() -> int:
             try:
                 webbrowser.open(Path(report_path).as_uri())
             except Exception:
-                pass
+                print("  [!] 无法打开浏览器", file=sys.stderr)
         except Exception as e:
             print(f"  [x] 报告失败: {e}")
 
