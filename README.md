@@ -92,7 +92,7 @@ relay-audit --serve 8080
 | `--key` | API Key（优先于环境变量） | - |
 | `--api-key-env` | Key 环境变量名 | `RELAY_API_KEY` |
 | `--timeout` | 请求超时秒数 | 60 |
-| `--samples` | 稳定性采样次数 | 3 |
+| `--samples` | 稳定性采样次数 | 2 |
 | `--compare` | 对比模型（可多次使用） | - |
 | `--quick` | 快速模式（跳过安全测试） | `false` |
 | `--stream` | 启用流式响应测试 | `false` |
@@ -102,8 +102,12 @@ relay-audit --serve 8080
 | `--skip-safety` | 跳过安全测试 | `false` |
 | `--config` | JSON 配置文件路径 | - |
 | `--save-key` | 保存 Key 到本地 | `false` |
-| `--models` | 只展示模型列表 | `false` |
+| `--models` / `--list-models` | 只展示模型列表，不跑测试 | `false` |
 | `--serve [PORT]` | 启动报告查看服务器 | 8080 |
+
+> 注意：`--save-key` 将 API Key **明文**保存在 `~/.relay_key`。工具会收紧该文件权限
+> （Linux/macOS 为 `0o600`，Windows 通过 `icacls` 仅授权当前用户），但不加密内容——
+> 共享机器上请慎用，或改用环境变量。
 
 ## 🧪 检测项目
 
@@ -124,11 +128,15 @@ relay-audit --serve 8080
 relay_audit/
 ├── __init__.py       # 版本信息
 ├── __main__.py       # python -m 入口
-├── cli.py            # 命令行界面 & 报告生成
-├── analyzer.py       # 分析检测逻辑 & 数据类型
+├── cli.py            # 命令行入口 & 交互模式
+├── models.py         # 数据类型定义
+├── patterns.py       # 检测模式与常量定义
+├── analysis.py       # 分析检测逻辑（错误诊断、延迟方差等）
+├── analyzer.py       # 向后兼容层（从新模块重导出符号）
 ├── client.py         # OpenAI API 异步客户端
 ├── scanner.py        # 测试编排与执行
 ├── provider.py       # 服务提供商检测
+├── reporter.py       # 报告生成（HTML / 终端 / JSON）
 └── serve.py          # 报告 Web 服务器
 ```
 
