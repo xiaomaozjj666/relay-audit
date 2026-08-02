@@ -6,13 +6,16 @@
 - analysis: 分析逻辑 (乱码、模型、响应头、Token、安全、稳定性、并发)
 - client: httpx 异步 API 客户端
 - scanner: 测试编排 (6大类别 20+ 项检测)
-- provider: Provider 枚举 + URL 自动检测
 - reporter: 报告生成 (HTML/终端/JSON)
 - cli: 命令行入口 + 交互模式
 - serve: HTTP 报告浏览服务器
 """
 
+from pathlib import Path
+
 __version__ = "2.1.0"
+
+REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 
 from relay_audit.models import (
     ChatResult,
@@ -47,7 +50,6 @@ from relay_audit.analysis import (
     encoding_consistency,
     mojibake_score,
 )
-from relay_audit.provider import Provider, detect_provider
 from relay_audit.client import ApiClient
 from relay_audit.scanner import (
     FUNCTION_CALLING_TOOLS,
@@ -95,9 +97,6 @@ __all__ = [
     "analyze_usage",
     "encoding_consistency",
     "mojibake_score",
-    # provider
-    "Provider",
-    "detect_provider",
     # client
     "ApiClient",
     # scanner

@@ -239,6 +239,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
             print("  [x] 无法自动选择模型，请用 --model 手动指定", file=sys.stderr)
             return 2, "", None
         config.model = selected[0]
+        config.model_ids = ids  # 避免 run_scan 再次请求 /v1/models
         print(f"  [i] 自动选择模型: {selected[0]}")
 
     result = asyncio.run(run_scan(config))

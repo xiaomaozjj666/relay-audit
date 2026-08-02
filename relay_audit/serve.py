@@ -2,17 +2,37 @@
 
 from __future__ import annotations
 
+import html as htmlmod
 import json
 import mimetypes
 import re
 import webbrowser
 from datetime import datetime
+import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
+from socketserver import ThreadingMixIn
 from typing import Any
 from urllib.parse import unquote
 
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
+from relay_audit import REPORTS_DIR
+
+
+def _safe_path(name: str) -> str:
+    """Strip directory components from name."""
+    return Path(name).name
+
+
+def _resolve_inside(name: str) -> Path | None:
+    """Resolve name relative to REPORTS_DIR; return None if it escapes."""
+    candidate = (REPORTS_DIR / _safe_path(name)).resolve()
+    try:
+        candidate.relative_to(REPORTS_DIR.resolve())
+    except ValueError:
+        return None
+    if candidate.is_file():
+        return candidate
+    return None
 
 
 def persist_result(result: Any, base_url: str) -> str:
@@ -73,7 +93,7 @@ def list_json_reports() -> list[dict]:
                     "type": "json",
                     "file": f.name,
                     "timestamp": data.get("timestamp", ""),
-                    "base_url": data.get("base_url", ""),
+                    "base_url": htmlmod.escape(data.get("base_url", "") or ""),
                     "risk_level": data.get("summary", {}).get("risk_level", ""),
                     "findings": data.get("summary", {}).get("total_findings", 0),
                     "tests_passed": data.get("summary", {}).get("tests_passed", 0),
@@ -141,7 +161,7 @@ def list_html_reports() -> list[dict]:
                     "type": "html",
                     "file": f.name,
                     "timestamp": ts_from_name,
-                    "base_url": base_url,
+                    "base_url": htmlmod.escape(base_url),
                     "risk_level": risk,
                     "findings": findings_count,
                     "tests_passed": tests_passed,
@@ -160,6 +180,35 @@ def list_reports() -> list[dict]:
     return all_reports
 
 
+# ═══════════════════════════════════════════════════════════════
+# mtime 缓存：避免每次请求都重新解析所有报告文件
+# ═══════════════════════════════════════════════════════════════
+
+_reports_cache: tuple[float, list[dict]] = (0, [])
+
+
+def list_reports_cached() -> list[dict]:
+    """Return cached report list, invalidated when any report file changes."""
+    global _reports_cache
+    mtime = 0.0
+    if REPORTS_DIR.is_dir():
+        try:
+            for f in REPORTS_DIR.iterdir():
+                if f.is_file() and (f.name.startswith("scan_") and f.name.endswith(".json") or
+                                    f.name.startswith("relay_report_") and f.name.endswith(".html")):
+                    mtime = max(mtime, f.stat().st_mtime)
+        except OSError:
+            mtime = time.time()
+    if mtime > _reports_cache[0]:
+        _reports_cache = (mtime, list_reports())
+    return _reports_cache[1]
+
+
+class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
+    """Threading HTTP server."""
+    daemon_threads = True
+
+
 class ReportHandler(SimpleHTTPRequestHandler):
     """Serves JSON/HTML report browsing."""
 
@@ -173,10 +222,10 @@ class ReportHandler(SimpleHTTPRequestHandler):
         elif path == "/api/reports":
             self._serve_reports_api()
         elif path.startswith("/api/report/"):
-            name = path.removeprefix("/api/report/")
+            name = _safe_path(path.removeprefix("/api/report/"))
             self._serve_single_json(name)
         elif path.startswith("/html/"):
-            name = path.removeprefix("/html/")
+            name = _safe_path(path.removeprefix("/html/"))
             self._serve_html(name)
         elif path.endswith(".html") or path.endswith(".htm"):
             name = Path(path).name
@@ -185,8 +234,12 @@ class ReportHandler(SimpleHTTPRequestHandler):
             super().do_GET()
 
     def _serve_html(self, name: str) -> None:
-        filepath = REPORTS_DIR / name
-        if not filepath.is_file() or not name.endswith((".html", ".htm")):
+        if not name.endswith((".html", ".htm")):
+            self.send_response(404)
+            self.end_headers()
+            return
+        filepath = _resolve_inside(name)
+        if filepath is None:
             self.send_response(404)
             self.end_headers()
             return
@@ -259,15 +312,19 @@ fetch('/api/reports').then(r=>r.json()).then(data=>{
         self.wfile.write(html.encode("utf-8"))
 
     def _serve_reports_api(self) -> None:
-        data = json.dumps(list_reports(), ensure_ascii=False)
+        data = json.dumps(list_reports_cached(), ensure_ascii=False)
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.end_headers()
         self.wfile.write(data.encode("utf-8"))
 
     def _serve_single_json(self, name: str) -> None:
-        filepath = REPORTS_DIR / name
-        if not filepath.is_file() or not name.endswith(".json"):
+        if not name.endswith(".json"):
+            self.send_response(404)
+            self.end_headers()
+            return
+        filepath = _resolve_inside(name)
+        if filepath is None:
             self.send_response(404)
             self.end_headers()
             return
@@ -285,7 +342,7 @@ fetch('/api/reports').then(r=>r.json()).then(data=>{
 def run_server(port: int = 8080, open_browser: bool = True) -> None:
     """Start the report viewer server."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    server = HTTPServer(("127.0.0.1", port), ReportHandler)
+    server = ThreadingHTTPServer(("127.0.0.1", port), ReportHandler)
     url = f"http://127.0.0.1:{port}"
     print(f"  [i] Report server started at {url}")
     if open_browser:

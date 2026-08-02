@@ -21,14 +21,13 @@ from .analysis import (
 )
 from .patterns import short
 from .client import ApiClient
-from .provider import Provider
 
 
 async def fetch_models(
-    base_url: str, api_key: str, timeout: int = 30, provider: Provider | None = None
+    base_url: str, api_key: str, timeout: int = 30
 ) -> list[str]:
     """只获取模型列表（不跑测试），供 cli 自动选择模型使用"""
-    async with ApiClient(base_url, api_key, timeout, provider) as client:
+    async with ApiClient(base_url, api_key, timeout) as client:
         _, raw, _, _, _ = await client.list_models()
         ids: list[str] = []
         if isinstance(raw, list):
@@ -140,76 +139,92 @@ async def run_scan(config: ScanConfig) -> ScanResult:
     _sem = asyncio.Semaphore(8)
 
     async with ApiClient(
-        config.base_url, key, config.timeout, config.provider
+        config.base_url, key, config.timeout
     ) as client:
         # ──────────────────────────────────────────────────────
-        # [1+2] 接口探测 & 前置健康检查 并发执行
+        # [1+2] 接口探测 & 前置健康检查
         # ──────────────────────────────────────────────────────
         _log("  [i] 探测接口 + 健康检查...")
 
-        async def _list_models_task() -> tuple[
-            int, list[dict], dict, float, dict[str, str]
-        ]:
-            async with _sem:
-                return await client.list_models()
+        pre_fetched_ids = config.model_ids
 
         async def _ping_task() -> ChatResult:
             async with _sem:
-                try:
-                    r = await client.chat(
-                        config.model,
-                        [{"role": "user", "content": "ping"}],
-                        temperature=0,
-                        max_tokens=10,
-                        request_timeout=8,
-                    )
-                    r.name = "前置检查"
-                    return r
-                except Exception as e:
-                    return ChatResult(
-                        "前置检查",
-                        config.model,
-                        False,
-                        0,
-                        0,
-                        "",
-                        str(e),
-                        {},
-                        "",
-                        0,
-                        str(e),
-                    )
-
-        (status, raw_models, parsed, lat, raw_headers), ping = await asyncio.gather(
-            _list_models_task(), _ping_task()
-        )
-
-        for item in raw_models:
-            if isinstance(item, dict):
-                models.append(
-                    ModelInfo(
-                        id=str(item.get("id", "")),
-                        object=str(item.get("object", "")),
-                        created=item.get("created", 0) or 0,
-                        owned_by=str(item.get("owned_by", "")),
-                    )
+                ping_timeout = max(8, config.timeout // 4)
+                for attempt in range(2):
+                    try:
+                        r = await client.chat(
+                            config.model,
+                            [{"role": "user", "content": "ping"}],
+                            temperature=0,
+                            max_tokens=10,
+                            request_timeout=ping_timeout,
+                            retry=False,
+                        )
+                        r.name = "前置检查"
+                        return r
+                    except Exception:
+                        if attempt == 0:
+                            await asyncio.sleep(1)
+                            continue
+                return ChatResult(
+                    "前置检查",
+                    config.model,
+                    False,
+                    0,
+                    0,
+                    "",
+                    "前置检查失败",
+                    {},
+                    "",
+                    0,
+                    "前置检查失败",
                 )
 
-        if status == 401:
-            findings.append(
-                Finding(
-                    Severity.CRITICAL,
-                    "鉴权失败",
-                    "/v1/models 拒绝了 API key",
-                    "security",
-                )
-            )
-        else:
+        if pre_fetched_ids:
+            # 已预取模型列表，跳过 /v1/models 请求
+            _log(f"  [i] 使用预取模型列表 ({len(pre_fetched_ids)} 个)...")
+            for mid in pre_fetched_ids:
+                models.append(ModelInfo(id=mid))
             findings.extend(analyze_models(models))
+            ping = await _ping_task()
+        else:
+            async def _list_models_task() -> tuple[
+                int, list[dict], dict, float, dict[str, str]
+            ]:
+                async with _sem:
+                    return await client.list_models()
 
-        # 分析响应头
-        if raw_headers:
-            findings.extend(analyze_headers(raw_headers))
+            (status, raw_models, parsed, lat, raw_headers), ping = await asyncio.gather(
+                _list_models_task(), _ping_task()
+            )
+
+            for item in raw_models:
+                if isinstance(item, dict):
+                    models.append(
+                        ModelInfo(
+                            id=str(item.get("id", "")),
+                            object=str(item.get("object", "")),
+                            created=item.get("created", 0) or 0,
+                            owned_by=str(item.get("owned_by", "")),
+                        )
+                    )
+
+            if status == 401:
+                findings.append(
+                    Finding(
+                        Severity.CRITICAL,
+                        "鉴权失败",
+                        "/v1/models 拒绝了 API key",
+                        "security",
+                    )
+                )
+            else:
+                findings.extend(analyze_models(models))
+
+            # 分析响应头
+            if raw_headers:
+                findings.extend(analyze_headers(raw_headers))
 
         # 模型偷换检测：请求的模型是否在 API 列表中？
         if config.model:
@@ -240,26 +255,40 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     )
                 )
 
-        # 如果前置检查抛异常（不可达），跳过后续测试
+        # 前置检查异常处理
         if ping.status == 0 and not ping.ok and ping.error and "HTTP" not in ping.error:
-            findings.append(
-                Finding(
-                    Severity.CRITICAL,
-                    "API 完全不可用",
-                    ping.error[:200],
-                    "quality",
-                    "中转站完全不可用，无法进行任何测试",
+            is_timeout = "timeout" in ping.error.lower()
+            if is_timeout:
+                # 纯超时不中止扫描，降级为 MEDIUM
+                findings.append(
+                    Finding(
+                        Severity.MEDIUM,
+                        "API 前置检查超时",
+                        ping.error[:200],
+                        "quality",
+                        "前置检查超时，可能网络较慢，继续执行后续测试",
+                    )
                 )
-            )
-            duration = time.perf_counter() - t0_all
-            return ScanResult(
-                config=config,
-                findings=findings,
-                results=results,
-                models=models,
-                started_at=started_at,
-                duration_s=duration,
-            )
+            else:
+                # 连接失败等不可达错误，中止扫描
+                findings.append(
+                    Finding(
+                        Severity.CRITICAL,
+                        "API 完全不可用",
+                        ping.error[:200],
+                        "quality",
+                        "中转站完全不可用，无法进行任何测试",
+                    )
+                )
+                duration = time.perf_counter() - t0_all
+                return ScanResult(
+                    config=config,
+                    findings=findings,
+                    results=results,
+                    models=models,
+                    started_at=started_at,
+                    duration_s=duration,
+                )
 
         # ──────────────────────────────────────────────────────
         # [3] 构建测试队列（全部并发执行）
@@ -374,10 +403,8 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 ),
             ]
 
-        if config.stream:
-            # 流式测试由下方独立的 chat_stream 块处理，不放入 adv_queue
-            # (避免 _run_with_fallback 以非流式方式重复发送同名请求)
-            pass
+        # 流式测试由下方独立的 chat_stream 块处理，不放入 adv_queue
+        # (避免 _run_with_fallback 以非流式方式重复发送同名请求)
 
         run_advanced = not config.quick
         run_count = len(test_queue) + (len(adv_queue) if run_advanced else 0)

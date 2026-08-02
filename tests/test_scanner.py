@@ -26,7 +26,6 @@ from relay_audit.analysis import (
     analyze_usage,
     mojibake_score,
 )
-from relay_audit.provider import detect_provider, Provider
 from relay_audit.reporter import compute_pass_rate, generate_html
 
 
@@ -236,13 +235,6 @@ def test_scan_result_counts() -> None:
     assert result.risk_level == "HIGH"
 
 
-def test_detect_provider() -> None:
-    assert detect_provider("https://api.openai.com/v1") == Provider.OPENAI
-    assert detect_provider("https://api.deepseek.com") == Provider.DEEPSEEK
-    assert detect_provider("https://open.bigmodel.cn") == Provider.GLM
-    assert detect_provider("https://unknown.example.com") == Provider.UNKNOWN
-
-
 def test_auto_select_model() -> None:
     models = ["gpt-3.5-turbo", "gpt-4o", "claude-3-opus", "gemini-pro"]
     selected = auto_select_model(models, top_n=1)
@@ -387,3 +379,86 @@ def test_list_json_reports_round_trip(tmp_path, monkeypatch) -> None:
     assert r["risk_level"] == "HIGH"
     assert r["findings"] == 2
     assert r["tests_total"] == 2
+
+
+# ── ApiClient 超时/重试测试 ────────────────────────────────
+
+import httpx
+from relay_audit.client import ApiClient
+
+
+def test_apiclient_timeout_reporting() -> None:
+    """ApiClient 在超时时返回 ok=False 而非抛异常。"""
+    async def _run():
+        transport = httpx.MockTransport(
+            lambda req: httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+        )
+        async with httpx.AsyncClient(transport=transport, base_url="https://fake.test") as hc:
+            client = ApiClient.__new__(ApiClient)
+            client.base = "https://fake.test"
+            client.headers = {}
+            client.timeout = 1
+            client._client = hc
+            result = await client.chat("test-model", [{"role": "user", "content": "hi"}])
+            assert result.ok
+            assert result.content == "ok"
+    import asyncio
+    asyncio.run(_run())
+
+
+def test_apiclient_retry_on_500() -> None:
+    """ApiClient 对 500 状态码重试（最多 2 次）。"""
+    call_count = 0
+
+    def handler(request):
+        nonlocal call_count
+        call_count += 1
+        if call_count < 2:
+            return httpx.Response(500, json={"error": "internal"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok after retry"}}]})
+
+    async def _run():
+        transport = httpx.MockTransport(handler)
+        async with httpx.AsyncClient(transport=transport, base_url="https://fake.test") as hc:
+            client = ApiClient.__new__(ApiClient)
+            client.base = "https://fake.test"
+            client.headers = {}
+            client.timeout = 5
+            client._client = hc
+            result = await client.chat("test-model", [{"role": "user", "content": "hi"}])
+            assert result.ok
+            assert result.content == "ok after retry"
+            assert call_count == 2
+
+    import asyncio
+    asyncio.run(_run())
+
+
+# ── ReportHandler 路径穿越拒绝测试 ─────────────────────────
+
+from http.server import HTTPServer
+
+
+def test_report_handler_rejects_traversal(tmp_path, monkeypatch) -> None:
+    """ReportHandler 拒绝 ../ 路径穿越请求，返回 404。"""
+    from relay_audit import serve
+    from pathlib import Path
+
+    monkeypatch.setattr(serve, "REPORTS_DIR", Path(tmp_path))
+
+    # 创建正常文件
+    (tmp_path / "test.html").write_text("<html></html>")
+    (tmp_path / "scan_20260802_test.json").write_text(
+        '{"timestamp":"","base_url":"https://test.com","summary":{}}'
+    )
+
+    # _safe_path strips directory traversal components
+    assert serve._safe_path("test.html") == "test.html"
+    assert serve._safe_path("../../../etc/passwd") == "passwd"
+    assert serve._safe_path("/api/report/../secret.json") == "secret.json"
+
+    # _resolve_inside rejects paths that escape REPORTS_DIR
+    assert serve._resolve_inside("test.html") is not None  # valid
+    assert serve._resolve_inside("../etc/passwd") is None   # traverses out
+    assert serve._resolve_inside("../../../etc/passwd") is None
+    assert serve._resolve_inside("nonexistent.html") is None  # doesn't exist

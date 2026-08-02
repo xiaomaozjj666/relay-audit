@@ -9,7 +9,6 @@ import time
 import httpx
 
 from .models import ChatResult
-from .provider import Provider, detect_provider
 
 
 def _parse_chat_response(
@@ -78,7 +77,6 @@ class ApiClient:
         base_url: str,
         api_key: str,
         timeout: int = 60,
-        provider: Provider | None = None,
     ):
         self.base = base_url.rstrip("/")
         # 自动去除末尾的 /v1，避免与请求路径中的 /v1 重复拼接
@@ -90,7 +88,6 @@ class ApiClient:
             "Accept": "application/json",
         }
         self.timeout = timeout
-        self.provider = provider or detect_provider(base_url)
         self._client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "ApiClient":

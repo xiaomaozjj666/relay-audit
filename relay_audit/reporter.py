@@ -8,6 +8,7 @@ import json
 import os
 from typing import Any
 
+from relay_audit import REPORTS_DIR
 from relay_audit.models import ChatResult, Finding, ScanResult
 from relay_audit.patterns import (
     CAT_CN,
@@ -57,15 +58,10 @@ def esc(text: str) -> str:
     return htmlmod.escape(redact(str(text)))
 
 
-def _project_dir() -> str:
-    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-
 def _reports_dir() -> str:
-    d = os.path.join(_project_dir(), "reports")
-    os.makedirs(d, exist_ok=True)
-    _clean_old_reports(d, days=7)
-    return d
+    REPORTS_DIR.mkdir(parents=True, exist_ok=True)
+    _clean_old_reports(str(REPORTS_DIR), days=7)
+    return str(REPORTS_DIR)
 
 
 # ═══════════════════════════════════════════════════════════════

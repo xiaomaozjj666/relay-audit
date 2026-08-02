@@ -4,10 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 from enum import Enum
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from relay_audit.provider import Provider
+from typing import Any
 
 
 class Severity(Enum):
@@ -101,7 +98,7 @@ class ScanConfig:
     output: str | None = None
     no_html: bool = False
     config_file: str | None = None
-    provider: Provider | None = None
+    model_ids: list[str] | None = None  # 预获取的模型ID列表，避免重复请求
     quiet: bool = False
 
 
