@@ -14,9 +14,8 @@ from typing import Any
 
 from . import __version__
 from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult
+from .reporter import print_json, print_terminal, save_report
 from .scanner import fetch_models, run_scan
-from .reporter import print_terminal, print_json, save_report
-
 
 # ── 工具函数 ──────────────────────────────────────────────────
 
@@ -29,7 +28,7 @@ def _load_key_from_file() -> str:
     kf = _key_path()
     if os.path.isfile(kf):
         try:
-            with open(kf, "r", encoding="utf-8") as f:
+            with open(kf, encoding="utf-8") as f:
                 return f.read().strip()
         except OSError:
             pass
@@ -155,10 +154,7 @@ def auto_select_model(model_ids: list[str], top_n: int = 1) -> list[str]:
 
     if len(per_family) < top_n:
         used = {m for m, _ in per_family}
-        all_scored = [
-            (candidates[i], version_score(candidates[i]))
-            for i in range(len(candidates))
-        ]
+        all_scored = [(candidates[i], version_score(candidates[i])) for i in range(len(candidates))]
         all_scored.sort(key=lambda x: x[1], reverse=True)
         for name, score in all_scored:
             if name not in used:
@@ -282,9 +278,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
 
 def cmd_list_models(args: argparse.Namespace) -> int:
     key = (
-        args.key
-        or os.environ.get(args.api_key_env or "RELAY_API_KEY", "")
-        or _load_key_from_file()
+        args.key or os.environ.get(args.api_key_env or "RELAY_API_KEY", "") or _load_key_from_file()
     )
     if not key:
         print("错误: API Key 未设置", file=sys.stderr)
@@ -344,13 +338,11 @@ def interactive() -> int:
         show_models_table(ids)
 
         models_to_test = auto_select_model(ids, top_n=3)
-        print(
-            f"\n  自动选择 {len(models_to_test)} 个最强模型: {', '.join(models_to_test)}"
-        )
+        print(f"\n  自动选择 {len(models_to_test)} 个最强模型: {', '.join(models_to_test)}")
 
         print(f"  [i] 并发扫描 {len(models_to_test)} 个模型...", flush=True)
 
-        async def _scan_one(model: str) -> tuple[str, ScanResult | None]:
+        async def _scan_one(model: str, url: str = url) -> tuple[str, ScanResult | None]:
             cfg = ScanConfig(base_url=url, model=model, no_html=True, quiet=True)
             try:
                 result = await run_scan(cfg)
@@ -365,12 +357,12 @@ def interactive() -> int:
                 print(f"  [x] {model}: 扫描失败 - {e}", file=sys.stderr)
                 return model, None
 
-        async def _run_all_scans() -> list[tuple[str, ScanResult | None]]:
-            return await asyncio.gather(*[_scan_one(m) for m in models_to_test])
+        async def _run_all_scans(
+            models: list[str] = models_to_test,
+        ) -> list[tuple[str, ScanResult | None]]:
+            return await asyncio.gather(*[_scan_one(m) for m in models])
 
-        scan_results: list[tuple[str, ScanResult | None]] = asyncio.run(
-            _run_all_scans()
-        )
+        scan_results: list[tuple[str, ScanResult | None]] = asyncio.run(_run_all_scans())
 
         all_findings: list[Finding] = []
         all_results_list: list[ChatResult] = []
@@ -422,12 +414,10 @@ def interactive() -> int:
 
 def load_config(path: str) -> dict[str, Any]:
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
             if not isinstance(data, dict):
-                print(
-                    f"  [w] 配置文件 {path} 顶层不是 JSON 对象，已忽略", file=sys.stderr
-                )
+                print(f"  [w] 配置文件 {path} 顶层不是 JSON 对象，已忽略", file=sys.stderr)
                 return {}
             return data
     except FileNotFoundError:
@@ -474,9 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ap.add_argument("--timeout", type=int, default=60, help="请求超时秒数 (默认 60)")
     ap.add_argument("--samples", type=int, default=2, help="稳定性采样次数 (默认 2)")
-    ap.add_argument(
-        "--compare", action="append", default=[], help="对比模型（可多次使用）"
-    )
+    ap.add_argument("--compare", action="append", default=[], help="对比模型（可多次使用）")
     ap.add_argument("--quick", action="store_true", help="快速模式（跳过安全测试）")
     ap.add_argument("--stream", action="store_true", help="启用流式响应测试")
     ap.add_argument("--json", action="store_true", help="输出 JSON 格式结果")

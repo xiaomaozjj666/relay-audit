@@ -6,9 +6,9 @@ import html as htmlmod
 import json
 import mimetypes
 import re
+import time
 import webbrowser
 from datetime import datetime
-import time
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 from pathlib import Path
 from socketserver import ThreadingMixIn
@@ -86,7 +86,7 @@ def list_json_reports() -> list[dict]:
     reports = []
     for f in sorted(REPORTS_DIR.glob("scan_*.json"), reverse=True):
         try:
-            with open(f, "r", encoding="utf-8") as fp:
+            with open(f, encoding="utf-8") as fp:
                 data = json.load(fp)
             reports.append(
                 {
@@ -114,9 +114,7 @@ def list_html_reports() -> list[dict]:
         try:
             content = f.read_text(encoding="utf-8", errors="ignore")
             url_match = re.search(r'<div class="url-text">([^<]+)</div>', content)
-            risk_match = re.search(
-                r'<span class="risk-level"[^>]*>([^<]+)</span>', content
-            )
+            risk_match = re.search(r'<span class="risk-level"[^>]*>([^<]+)</span>', content)
             high_match = re.search(
                 r'stat-pill-high"><span class="stat-pill-num">(\d+)</span>', content
             )
@@ -136,9 +134,7 @@ def list_html_reports() -> list[dict]:
             name_match = re.match(r"relay_report_(\d{8})_(\d{6})", f.stem)
             if name_match:
                 dp, tp = name_match.group(1), name_match.group(2)
-                ts_from_name = (
-                    f"{dp[:4]}-{dp[4:6]}-{dp[6:8]} {tp[:2]}:{tp[2:4]}:{tp[4:6]}"
-                )
+                ts_from_name = f"{dp[:4]}-{dp[4:6]}-{dp[6:8]} {tp[:2]}:{tp[2:4]}:{tp[4:6]}"
 
             base_url = url_match.group(1).strip() if url_match else f.name
             risk = ""
@@ -151,9 +147,7 @@ def list_html_reports() -> list[dict]:
                 elif "低" in risk_text:
                     risk = "LOW"
 
-            findings_count = sum(
-                int(m.group(1)) for m in (high_match, med_match, low_match) if m
-            )
+            findings_count = sum(int(m.group(1)) for m in (high_match, med_match, low_match) if m)
             tests_passed = int(pass_match.group(1)) if pass_match else 0
             tests_total = int(pass_match.group(2)) if pass_match else 0
             reports.append(
@@ -194,8 +188,12 @@ def list_reports_cached() -> list[dict]:
     if REPORTS_DIR.is_dir():
         try:
             for f in REPORTS_DIR.iterdir():
-                if f.is_file() and (f.name.startswith("scan_") and f.name.endswith(".json") or
-                                    f.name.startswith("relay_report_") and f.name.endswith(".html")):
+                if f.is_file() and (
+                    f.name.startswith("scan_")
+                    and f.name.endswith(".json")
+                    or f.name.startswith("relay_report_")
+                    and f.name.endswith(".html")
+                ):
                     mtime = max(mtime, f.stat().st_mtime)
         except OSError:
             mtime = time.time()
@@ -206,6 +204,7 @@ def list_reports_cached() -> list[dict]:
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     """Threading HTTP server."""
+
     daemon_threads = True
 
 

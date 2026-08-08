@@ -2,7 +2,14 @@
 
 from dataclasses import asdict
 
-from relay_audit.scanner import TestCase
+from relay_audit.analysis import (
+    analyze_chat,
+    analyze_concurrent,
+    analyze_models,
+    analyze_stability,
+    analyze_usage,
+    mojibake_score,
+)
 from relay_audit.cli import auto_select_model
 from relay_audit.models import (
     ChatResult,
@@ -18,15 +25,8 @@ from relay_audit.patterns import (
     redact,
     short,
 )
-from relay_audit.analysis import (
-    analyze_chat,
-    analyze_concurrent,
-    analyze_models,
-    analyze_stability,
-    analyze_usage,
-    mojibake_score,
-)
 from relay_audit.reporter import compute_pass_rate, generate_html
+from relay_audit.scanner import TestCase
 
 
 def test_testcase_defaults() -> None:
@@ -59,9 +59,7 @@ def test_testcase_with_tools() -> None:
             "function": {"name": "test", "description": "", "parameters": {}},
         }
     ]
-    tc = TestCase(
-        name="tools", messages=[{"role": "user", "content": "call"}], tools=tools
-    )
+    tc = TestCase(name="tools", messages=[{"role": "user", "content": "call"}], tools=tools)
     assert tc.tools == tools
 
 
@@ -384,11 +382,13 @@ def test_list_json_reports_round_trip(tmp_path, monkeypatch) -> None:
 # ── ApiClient 超时/重试测试 ────────────────────────────────
 
 import httpx
+
 from relay_audit.client import ApiClient
 
 
 def test_apiclient_timeout_reporting() -> None:
     """ApiClient 在超时时返回 ok=False 而非抛异常。"""
+
     async def _run():
         transport = httpx.MockTransport(
             lambda req: httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
@@ -402,7 +402,9 @@ def test_apiclient_timeout_reporting() -> None:
             result = await client.chat("test-model", [{"role": "user", "content": "hi"}])
             assert result.ok
             assert result.content == "ok"
+
     import asyncio
+
     asyncio.run(_run())
 
 
@@ -431,18 +433,18 @@ def test_apiclient_retry_on_500() -> None:
             assert call_count == 2
 
     import asyncio
+
     asyncio.run(_run())
 
 
 # ── ReportHandler 路径穿越拒绝测试 ─────────────────────────
 
-from http.server import HTTPServer
-
 
 def test_report_handler_rejects_traversal(tmp_path, monkeypatch) -> None:
     """ReportHandler 拒绝 ../ 路径穿越请求，返回 404。"""
-    from relay_audit import serve
     from pathlib import Path
+
+    from relay_audit import serve
 
     monkeypatch.setattr(serve, "REPORTS_DIR", Path(tmp_path))
 
@@ -459,6 +461,6 @@ def test_report_handler_rejects_traversal(tmp_path, monkeypatch) -> None:
 
     # _resolve_inside rejects paths that escape REPORTS_DIR
     assert serve._resolve_inside("test.html") is not None  # valid
-    assert serve._resolve_inside("../etc/passwd") is None   # traverses out
+    assert serve._resolve_inside("../etc/passwd") is None  # traverses out
     assert serve._resolve_inside("../../../etc/passwd") is None
     assert serve._resolve_inside("nonexistent.html") is None  # doesn't exist

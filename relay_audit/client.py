@@ -90,7 +90,7 @@ class ApiClient:
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "ApiClient":
+    async def __aenter__(self) -> ApiClient:
         self._client = httpx.AsyncClient(
             base_url=self.base,
             headers=self.headers,
@@ -167,14 +167,10 @@ class ApiClient:
                 )
             except httpx.HTTPStatusError as e:
                 lat = time.perf_counter() - t0
-                return _parse_chat_response(
-                    model, e.response.status_code, e.response, lat
-                )
+                return _parse_chat_response(model, e.response.status_code, e.response, lat)
             except Exception as e:
                 lat = time.perf_counter() - t0
-                return ChatResult(
-                    "", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e)
-                )
+                return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e))
 
         return ChatResult(
             "",

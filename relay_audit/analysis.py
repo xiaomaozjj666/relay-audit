@@ -17,7 +17,6 @@ from relay_audit.patterns import (
     short,
 )
 
-
 # ═══════════════════════════════════════════════════════════════
 # 乱码 & 编码检测
 # ═══════════════════════════════════════════════════════════════
@@ -103,9 +102,7 @@ def analyze_models(models: list[ModelInfo]) -> list[Finding]:
                 "多供应商聚合",
                 f"模型包含多系列: {', '.join(present)}。路由不透明。",
                 "model",
-                "同一个 API 聚合了多家模型，中转可能替换了实际模型"
-                if len(present) >= 5
-                else "",
+                "同一个 API 聚合了多家模型，中转可能替换了实际模型" if len(present) >= 5 else "",
             )
         )
 
@@ -125,9 +122,7 @@ def analyze_models(models: list[ModelInfo]) -> list[Finding]:
         )
 
     commercial = sum(
-        1
-        for m in ids
-        if any(f in m.lower() for f in ["gpt-4", "gpt-5", "claude-", "gemini-"])
+        1 for m in ids if any(f in m.lower() for f in ["gpt-4", "gpt-5", "claude-", "gemini-"])
     )
     total = len(ids)
     if total > 10 and commercial / total > 0.6:
@@ -186,9 +181,7 @@ def analyze_model_swap(requested_model: str, models: list[ModelInfo]) -> list[Fi
     return fs
 
 
-def analyze_error_pattern(
-    results: list[ChatResult], config_model: str
-) -> list[Finding]:
+def analyze_error_pattern(results: list[ChatResult], config_model: str) -> list[Finding]:
     """分析测试结果中的错误模式 — 检测中转站批量失败"""
     fs: list[Finding] = []
     if not results:
@@ -328,11 +321,7 @@ def analyze_usage(usage: dict, result: ChatResult | None = None) -> list[Finding
     fs: list[Finding] = []
     if not usage:
         if result and result.ok:
-            fs.append(
-                Finding(
-                    Severity.LOW, "无 Token 统计", "响应未返回 usage 字段", "quality"
-                )
-            )
+            fs.append(Finding(Severity.LOW, "无 Token 统计", "响应未返回 usage 字段", "quality"))
         return fs
 
     prompt = usage.get("prompt_tokens", 0) or 0
@@ -455,11 +444,7 @@ def analyze_chat(result: ChatResult, kind: str = "quality") -> list[Finding]:
     # 编码一致性
     enc = encoding_consistency(result.content)
     if not enc["ok"]:
-        fs.append(
-            Finding(
-                Severity.LOW, "编码异常", f"{', '.join(enc['issues'])}", "quality", ""
-            )
-        )
+        fs.append(Finding(Severity.LOW, "编码异常", f"{', '.join(enc['issues'])}", "quality", ""))
 
     # 身份检测
     if kind == "identity":

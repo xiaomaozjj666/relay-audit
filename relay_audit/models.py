@@ -18,9 +18,7 @@ class Severity(Enum):
 
     @property
     def rank(self) -> int:
-        return {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(
-            self.value, 0
-        )
+        return {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(self.value, 0)
 
     @property
     def emoji(self) -> str:

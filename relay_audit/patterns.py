@@ -28,9 +28,7 @@ def short(text: str, n: int = 500) -> str:
 
 DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(
-            r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=", re.I
-        ),
+        re.compile(r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=", re.I),
         "Cookie 窃取",
     ),
     (

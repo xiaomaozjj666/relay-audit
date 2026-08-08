@@ -39,6 +39,12 @@ target-version = "py310"
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B"]
 
+# E402: __init__.py 需要先定义 REPORTS_DIR 再导入子模块（规避循环导入）；
+#       test_scanner.py 在文件中部引入 httpx/ApiClient 供用例复用。
+[tool.ruff.lint.per-file-ignores]
+"relay_audit/__init__.py" = ["E402"]
+"tests/test_scanner.py" = ["E402"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 

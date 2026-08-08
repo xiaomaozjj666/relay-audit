@@ -21,7 +21,6 @@ from relay_audit.patterns import (
     short,
 )
 
-
 # ═══════════════════════════════════════════════════════════════
 # 通过率计算
 # ═══════════════════════════════════════════════════════════════
@@ -100,10 +99,10 @@ def _print_plain(result: ScanResult) -> None:
 
 
 def _print_rich(result: ScanResult) -> None:
-    from rich.console import Console
-    from rich.table import Table
-    from rich.panel import Panel
     from rich import box
+    from rich.console import Console
+    from rich.panel import Panel
+    from rich.table import Table
 
     console = Console()
     ok = [r for r in result.results if r.ok]
@@ -190,12 +189,8 @@ def _print_rich(result: ScanResult) -> None:
         else:
             ok_cls = "[red]✗[/]"
         tps_s = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
-        lat_color = (
-            "red" if r.latency_ms > 3000 else "yellow" if r.latency_ms > 1000 else ""
-        )
-        lat_s = (
-            f"[{lat_color}]{r.latency_ms}ms[/]" if lat_color else f"{r.latency_ms}ms"
-        )
+        lat_color = "red" if r.latency_ms > 3000 else "yellow" if r.latency_ms > 1000 else ""
+        lat_s = f"[{lat_color}]{r.latency_ms}ms[/]" if lat_color else f"{r.latency_ms}ms"
         st = " [dim][流][/]" if r.streaming else ""
         rt.add_row(
             f"{r.name}{st}",
@@ -284,9 +279,7 @@ def _generate_recommendations(result: ScanResult) -> tuple[str, int]:
     if result.high_count:
         recs.append("存在高危问题，建议立即排查中转服务的安全性和模型真实性")
     if "identity" in cats:
-        recs.append(
-            "检测到模型身份异常，中转可能替换了实际使用的模型，建议对比官方 API 输出"
-        )
+        recs.append("检测到模型身份异常，中转可能替换了实际使用的模型，建议对比官方 API 输出")
     if "security" in cats:
         recs.append("安全测试发现风险，建议确认中转服务是否对模型输出做了安全过滤")
     if any("Token" in f.title or "token" in f.title.lower() for f in result.findings):
@@ -351,11 +344,7 @@ def generate_html(result: ScanResult) -> str:
         sv = sev_cn.get(sc, sc)
         cc = cat_cn.get(f.category, f.category)
         reason = f" <span class='r'>{esc(f.reason)}</span>" if f.reason else ""
-        model_tag = (
-            f" <span class='model-tag'>{esc(f.model_name)}</span>"
-            if f.model_name
-            else ""
-        )
+        model_tag = f" <span class='model-tag'>{esc(f.model_name)}</span>" if f.model_name else ""
         return (
             f'<tr class="sev-{sc}">'
             f'<td><span class="tag tag-{sc}">{sv}</span></td>'
@@ -757,4 +746,5 @@ def _clean_old_reports(dir_path: str, days: int = 7) -> None:
                     os.remove(fp)
     except Exception:
         import sys
+
         print("  [!] 清理旧报告失败", file=sys.stderr)

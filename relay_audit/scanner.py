@@ -9,23 +9,21 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity
 from .analysis import (
     analyze_chat,
     analyze_concurrent,
+    analyze_error_pattern,
     analyze_headers,
+    analyze_model_swap,
     analyze_models,
     analyze_stability,
-    analyze_model_swap,
-    analyze_error_pattern,
 )
-from .patterns import short
 from .client import ApiClient
+from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity
+from .patterns import short
 
 
-async def fetch_models(
-    base_url: str, api_key: str, timeout: int = 30
-) -> list[str]:
+async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[str]:
     """只获取模型列表（不跑测试），供 cli 自动选择模型使用"""
     async with ApiClient(base_url, api_key, timeout) as client:
         _, raw, _, _, _ = await client.list_models()
@@ -138,9 +136,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
     # 全局并发信号量：连接池上限 32，留余量给重试/降级
     _sem = asyncio.Semaphore(8)
 
-    async with ApiClient(
-        config.base_url, key, config.timeout
-    ) as client:
+    async with ApiClient(config.base_url, key, config.timeout) as client:
         # ──────────────────────────────────────────────────────
         # [1+2] 接口探测 & 前置健康检查
         # ──────────────────────────────────────────────────────
@@ -189,9 +185,8 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             findings.extend(analyze_models(models))
             ping = await _ping_task()
         else:
-            async def _list_models_task() -> tuple[
-                int, list[dict], dict, float, dict[str, str]
-            ]:
+
+            async def _list_models_task() -> tuple[int, list[dict], dict, float, dict[str, str]]:
                 async with _sem:
                     return await client.list_models()
 
@@ -298,9 +293,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
 
         # ── 基础测试（纯文本，所有模型都应支持） ──
         test_queue: list[TestCase] = [
-            TestCase(
-                "基础对话", [{"role": "user", "content": "只输出OK"}], max_tokens=10
-            ),
+            TestCase("基础对话", [{"role": "user", "content": "只输出OK"}], max_tokens=10),
             TestCase(
                 "身份识别",
                 [{"role": "user", "content": PROMPTS["identity"]}],
@@ -599,9 +592,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 all_tasks.append(_run_compare(cm))
 
         # ── 一次性并发执行所有任务 ──
-        chat_results: list[Any] = await asyncio.gather(
-            *all_tasks, return_exceptions=True
-        )
+        chat_results: list[Any] = await asyncio.gather(*all_tasks, return_exceptions=True)
 
         # 流式测试（单独处理 — chat_stream 不同于 chat，不走 _sem）
         if config.stream:

@@ -17,6 +17,19 @@ __version__ = "2.1.0"
 
 REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 
+from relay_audit.analysis import (
+    analyze_chat,
+    analyze_concurrent,
+    analyze_error_pattern,
+    analyze_headers,
+    analyze_model_swap,
+    analyze_models,
+    analyze_stability,
+    analyze_usage,
+    encoding_consistency,
+    mojibake_score,
+)
+from relay_audit.client import ApiClient
 from relay_audit.models import (
     ChatResult,
     Finding,
@@ -38,32 +51,19 @@ from relay_audit.patterns import (
     redact,
     short,
 )
-from relay_audit.analysis import (
-    analyze_chat,
-    analyze_concurrent,
-    analyze_error_pattern,
-    analyze_headers,
-    analyze_model_swap,
-    analyze_models,
-    analyze_stability,
-    analyze_usage,
-    encoding_consistency,
-    mojibake_score,
-)
-from relay_audit.client import ApiClient
-from relay_audit.scanner import (
-    FUNCTION_CALLING_TOOLS,
-    PROMPTS,
-    TestCase,
-    fetch_models,
-    run_scan,
-)
 from relay_audit.reporter import (
     compute_pass_rate,
     generate_html,
     print_json,
     print_terminal,
     save_report,
+)
+from relay_audit.scanner import (
+    FUNCTION_CALLING_TOOLS,
+    PROMPTS,
+    TestCase,
+    fetch_models,
+    run_scan,
 )
 
 __all__ = [
