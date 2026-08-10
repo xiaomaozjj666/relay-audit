@@ -132,10 +132,8 @@ relay_audit/
 ├── models.py         # 数据类型定义
 ├── patterns.py       # 检测模式与常量定义
 ├── analysis.py       # 分析检测逻辑（错误诊断、延迟方差等）
-├── analyzer.py       # 向后兼容层（从新模块重导出符号）
 ├── client.py         # OpenAI API 异步客户端
 ├── scanner.py        # 测试编排与执行
-├── provider.py       # 服务提供商检测
 ├── reporter.py       # 报告生成（HTML / 终端 / JSON）
 └── serve.py          # 报告 Web 服务器
 ```
