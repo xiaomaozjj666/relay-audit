@@ -25,7 +25,6 @@ pip install relay-audit
 
 ```bash
 git clone https://github.com/xiaomaozjj666/relay-audit.git
-# 或 git clone https://gitlab.com/cloudnuxes-group/relay-audit.git
 cd relay-audit
 pip install -e .
 ```
