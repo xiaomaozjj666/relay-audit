@@ -28,42 +28,42 @@ def short(text: str, n: int = 500) -> str:
 
 DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=", re.I),
+        re.compile(r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=", re.IGNORECASE),
         "Cookie 窃取",
     ),
     (
-        re.compile(r"requests\.post\(|axios\.post\(|fetch\s*\(|XMLHttpRequest", re.I),
+        re.compile(r"requests\.post\(|axios\.post\(|fetch\s*\(|XMLHttpRequest", re.IGNORECASE),
         "HTTP 外传",
     ),
     (
-        re.compile(r"rm\s+-rf|shutil\.rmtree|os\.remove|Remove-Item|del\s+/[fs]", re.I),
+        re.compile(r"rm\s+-rf|shutil\.rmtree|os\.remove|Remove-Item|del\s+/[fs]", re.IGNORECASE),
         "破坏文件",
     ),
     (
-        re.compile(r"keylogger|persistence|reverse\s+shell|backdoor|trojan", re.I),
+        re.compile(r"keylogger|persistence|reverse\s+shell|backdoor|trojan", re.IGNORECASE),
         "恶意载荷",
     ),
     (
-        re.compile(r"credential|password\s*=\s*['\"]|\.env\s|环境变量.*发送", re.I),
+        re.compile(r"credential|password\s*=\s*['\"]|\.env\s|环境变量.*发送", re.IGNORECASE),
         "凭据窃取",
     ),
-    (re.compile(r"eval\s*\(|exec\s*\(|subprocess\.|os\.system\(", re.I), "代码执行"),
-    (re.compile(r"AES\.new|Crypto\.|加密.*文件|ransomware|勒索", re.I), "勒索软件"),
-    (re.compile(r"base64\.b64decode|atob\(|Buffer\.from|btoa\(", re.I), "编码混淆"),
+    (re.compile(r"eval\s*\(|exec\s*\(|subprocess\.|os\.system\(", re.IGNORECASE), "代码执行"),
+    (re.compile(r"AES\.new|Crypto\.|加密.*文件|ransomware|勒索", re.IGNORECASE), "勒索软件"),
+    (re.compile(r"base64\.b64decode|atob\(|Buffer\.from|btoa\(", re.IGNORECASE), "编码混淆"),
     (
-        re.compile(r"nmap|sqlmap|metasploit|nc\s+-e|chmod\s\+s|msfvenom", re.I),
+        re.compile(r"nmap|sqlmap|metasploit|nc\s+-e|chmod\s\+s|msfvenom", re.IGNORECASE),
         "渗透工具",
     ),
     (
-        re.compile(r"socket\.connect|connect\(.*\)|\.bind\(|监听|listen", re.I),
+        re.compile(r"socket\.connect|connect\(.*\)|\.bind\(|监听|listen", re.IGNORECASE),
         "网络连接",
     ),
     (
-        re.compile(r"Selenium|PhantomJS|puppeteer|headless|爬取.*登录", re.I),
+        re.compile(r"Selenium|PhantomJS|puppeteer|headless|爬取.*登录", re.IGNORECASE),
         "自动化攻击",
     ),
-    (re.compile(r"DDoS|洪水|SYN flood|CC攻击|大量并发", re.I), "拒绝服务"),
-    (re.compile(r"钓鱼|phishing|伪冒|登录页面.*发送|credentials", re.I), "钓鱼攻击"),
+    (re.compile(r"DDoS|洪水|SYN flood|CC攻击|大量并发", re.IGNORECASE), "拒绝服务"),
+    (re.compile(r"钓鱼|phishing|伪冒|登录页面.*发送|credentials", re.IGNORECASE), "钓鱼攻击"),
 ]
 
 # ═══════════════════════════════════════════════════════════════
@@ -72,20 +72,20 @@ DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(r"gpt-5\.[6-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.I),
+        re.compile(r"gpt-5\.[6-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.IGNORECASE),
         "GPT 不存在版本 (最高 GPT-5.5)",
     ),
-    (re.compile(r"opus-(?!4-[5-8]\b)\d", re.I), "Claude 不存在版本 (最高 Opus 4.8)"),
+    (re.compile(r"opus-(?!4-[5-8]\b)\d", re.IGNORECASE), "Claude 不存在版本 (最高 Opus 4.8)"),
     (
-        re.compile(r"gemini-3\.[2-9]|gemini-3\.\d{2,}|gemini-[4-9]", re.I),
+        re.compile(r"gemini-3\.[2-9]|gemini-3\.\d{2,}|gemini-[4-9]", re.IGNORECASE),
         "Gemini 不存在版本 (最高 3.1)",
     ),
     (
-        re.compile(r"qwen-3\.[89]|qwen-3\.\d{2,}|qwen-[4-9]", re.I),
+        re.compile(r"qwen-3\.[89]|qwen-3\.\d{2,}|qwen-[4-9]", re.IGNORECASE),
         "Qwen 不存在版本 (最高 3.7)",
     ),
-    (re.compile(r"deepseek-v[5-9]", re.I), "DeepSeek 不存在版本 (最高 V4)"),
-    (re.compile(r"free|auto|router|pool|fallback", re.I), "路由/聚合类模型"),
+    (re.compile(r"deepseek-v[5-9]", re.IGNORECASE), "DeepSeek 不存在版本 (最高 V4)"),
+    (re.compile(r"free|auto|router|pool|fallback", re.IGNORECASE), "路由/聚合类模型"),
     (re.compile(r"[?]"), "模型名含问号"),
 ]
 
@@ -151,7 +151,7 @@ REFUSAL_PATTERNS = re.compile(
     r"DENIED|I'?m?\s+(not\s+able|unable)|"
     r"I cannot|cannot fulfill|I won't|I will not|"
     r"作为.*AI|作为.*助手|i'm just an ai",
-    re.I,
+    re.IGNORECASE,
 )
 
 PROXY_HEADERS = {

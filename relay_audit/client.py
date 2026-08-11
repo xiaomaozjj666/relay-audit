@@ -80,8 +80,7 @@ class ApiClient:
     ):
         self.base = base_url.rstrip("/")
         # 自动去除末尾的 /v1，避免与请求路径中的 /v1 重复拼接
-        if self.base.endswith("/v1"):
-            self.base = self.base[:-3]
+        self.base = self.base.removesuffix("/v1")
         self.headers = {
             "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",

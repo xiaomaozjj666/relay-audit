@@ -182,9 +182,7 @@ def _print_rich(result: ScanResult) -> None:
         refused = _is_refused_by_pattern(r)
         if _is_safety_refused(r):
             ok_cls = "[yellow]拒[/]"
-        elif refused:
-            ok_cls = "[green]✓[/]"
-        elif r.ok:
+        elif refused or r.ok:
             ok_cls = "[green]✓[/]"
         else:
             ok_cls = "[red]✗[/]"
@@ -361,9 +359,7 @@ def generate_html(result: ScanResult) -> str:
     ok_tests = []
     for r in result.results:
         refused = _is_refused_by_pattern(r)
-        if _is_safety_refused(r):
-            s_tag, s_cls, row_cls = "拒绝", "refused", "ok"
-        elif refused:
+        if _is_safety_refused(r) or refused:
             s_tag, s_cls, row_cls = "拒绝", "refused", "ok"
         elif r.ok:
             s_tag, s_cls, row_cls = "通过", "ok", "ok"
