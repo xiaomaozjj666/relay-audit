@@ -3,6 +3,7 @@
 import json
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -40,7 +41,7 @@ def test_save_key_posix(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli, "_key_path", lambda: kf)
     monkeypatch.setattr(cli.sys, "platform", "linux")
     cli._save_key_to_file("sk-posix")
-    assert open(kf, encoding="utf-8").read() == "sk-posix"
+    assert Path(kf).read_text(encoding="utf-8") == "sk-posix"
     if os.name != "nt":  # Windows 忽略 os.open 的 mode 参数
         assert stat.S_IMODE(os.stat(kf).st_mode) == 0o600
 
@@ -58,7 +59,7 @@ def test_save_key_win32(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     monkeypatch.setattr(cli.os, "getlogin", lambda: "tester")
     cli._save_key_to_file("sk-win")
-    assert open(kf, encoding="utf-8").read() == "sk-win"
+    assert Path(kf).read_text(encoding="utf-8") == "sk-win"
     assert runs and runs[0][0] == "icacls"
     assert not os.path.exists(kf + ".tmp")  # 临时文件已原子替换
 
@@ -74,7 +75,7 @@ def test_save_key_win32_icacls_fails(monkeypatch, tmp_path, capsys) -> None:
     monkeypatch.setattr(cli.subprocess, "run", boom)
     monkeypatch.setattr(cli.os, "getlogin", lambda: "tester")
     cli._save_key_to_file("sk-win")
-    assert open(kf, encoding="utf-8").read() == "sk-win"
+    assert Path(kf).read_text(encoding="utf-8") == "sk-win"
     assert "无法设置密钥文件权限" in capsys.readouterr().err
 
 
@@ -88,7 +89,7 @@ def test_key_path_default(monkeypatch) -> None:
 def test_load_key_from_file_oserror(monkeypatch, tmp_path, capsys) -> None:
     kf = str(tmp_path / "key")
     monkeypatch.setattr(cli, "_key_path", lambda: kf)
-    open(kf, "w", encoding="utf-8").write("sk-x")
+    Path(kf).write_text("sk-x", encoding="utf-8")
 
     def boom(path, **kw):
         raise OSError("denied")

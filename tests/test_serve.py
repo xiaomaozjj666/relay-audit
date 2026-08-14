@@ -4,6 +4,7 @@ import http.client
 import json
 import re
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -81,7 +82,7 @@ def test_persist_result_redacts_and_hashes(tmp_path, monkeypatch) -> None:
     path = serve.persist_result(r, "https://api.example.com?x=1&y=2")
     name = str(path).replace("\\", "/").split("/")[-1]
     assert re.match(r"scan_\d{8}_\d{6}_[0-9a-f]{8}_", name)
-    data = json.loads(open(path, encoding="utf-8").read())
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
     raw = json.dumps(data, ensure_ascii=False)
     assert "sk-abcdefghijklmnop123456" not in raw
     assert "[REDACTED]" in raw

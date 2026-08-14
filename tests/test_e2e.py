@@ -7,6 +7,7 @@ fetch_models → auto_select → run_scan（真实 HTTP）→ persist_result →
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 
 import pytest
 
@@ -106,7 +107,7 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
     assert result.config.model == "gpt-4o"
 
     # HTML 报告已生成
-    html = open(report_path, encoding="utf-8").read()
+    html = Path(report_path).read_text(encoding="utf-8")
     assert "Relay Audit" in html
     assert "gpt-4o" in html
 
