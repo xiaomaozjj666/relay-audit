@@ -431,6 +431,11 @@ def _interactive_inputs(values):
     return lambda prompt="": next(it)
 
 
+def _mock_getpass(monkeypatch, values):
+    it = iter(values)
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(it))
+
+
 def test_interactive_flow(monkeypatch, capsys) -> None:
     async def fake_fetch(*a, **k):
         return ["gpt-4o", "claude-3", "gemini-pro"]
@@ -449,8 +454,10 @@ def test_interactive_flow(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_save_key_to_file", fake_save_key)
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "interactive.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test"])
     monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "y", "https://api.example.com", "n"])
+        "builtins.input",
+        _interactive_inputs(["y", "https://api.example.com", "", "n"]),  # 保存/URL/模型确认/退出
     )
 
     assert cli.interactive() == 0
@@ -473,9 +480,8 @@ def test_interactive_saved_key_skips_prompt(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "saved-key")
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "https://api.example.com", "n"])
-    )
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr("builtins.input", _interactive_inputs(["https://api.example.com", "", "n"]))
     assert cli.interactive() == 0
 
 
@@ -491,9 +497,8 @@ def test_interactive_scan_failure(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "https://api.example.com", "n"])
-    )
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr("builtins.input", _interactive_inputs(["https://api.example.com", "", "n"]))
     assert cli.interactive() == 0
     err = capsys.readouterr().err
     assert "扫描失败" in err
@@ -505,8 +510,9 @@ def test_interactive_fetch_fails(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(cli, "fetch_models", fake_fetch)
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
+    _mock_getpass(monkeypatch, ["sk-test"])
     monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "n", "https://api.example.com", "n"])
+        "builtins.input", _interactive_inputs(["n", "https://api.example.com", "n"])
     )
     assert cli.interactive() == 0
     out = capsys.readouterr().out
@@ -527,16 +533,15 @@ def test_interactive_report_failure(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "run_scan", fake_run_scan)
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
     monkeypatch.setattr(cli, "save_report", bad_save)
-    monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "https://api.example.com", "n"])
-    )
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr("builtins.input", _interactive_inputs(["https://api.example.com", "", "n"]))
     assert cli.interactive() == 0
     out = capsys.readouterr().out
     assert "报告失败" in out
 
 
 def test_interactive_empty_input_retries(monkeypatch, capsys) -> None:
-    """空 Key/空地址会重新提示（覆盖 while not key / while not url 循环）。"""
+    """空 Key/空地址/非法地址会重新提示。"""
 
     async def fake_fetch(*a, **k):
         return ["gpt-4o"]
@@ -549,14 +554,25 @@ def test_interactive_empty_input_retries(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["", "sk-test"])
     monkeypatch.setattr(
         "builtins.input",
-        _interactive_inputs(["", "sk-test", "n", "", "https://api.example.com", "n"]),
+        _interactive_inputs(
+            [
+                "n",  # 不保存
+                "",  # 空地址
+                "ftp://bad",  # 非法前缀
+                "https://api.example.com",
+                "",  # 模型确认回车
+                "n",
+            ]
+        ),
     )
     assert cli.interactive() == 0
     out = capsys.readouterr().out
     assert "API Key 不能为空" in out
     assert "地址不能为空" in out
+    assert "需以 http:// 或 https:// 开头" in out
 
 
 def test_interactive_fetch_raises_then_retry(monkeypatch, capsys) -> None:
@@ -578,23 +594,155 @@ def test_interactive_fetch_raises_then_retry(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test", "sk-test"])
     monkeypatch.setattr(
         "builtins.input",
         _interactive_inputs(
             [
-                "sk-test",
                 "https://api.example.com",
                 "y",  # 第一次失败 → 重试
-                "sk-test",
                 "https://api.example.com",
-                "n",
-            ]  # 第二次成功 → 退出
+                "",  # 模型确认
+                "n",  # 退出
+            ]
         ),
     )
     assert cli.interactive() == 0
     out = capsys.readouterr().out
     assert "无法连接" in out
     assert "未发现高危问题" in out
+
+
+def test_interactive_model_selection_by_index(monkeypatch, capsys) -> None:
+    """输入序号选择模型（auto_select 顺序：claude 优先 → 序号 1 = claude-3）。"""
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o", "claude-3", "gemini-pro"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr(
+        "builtins.input", _interactive_inputs(["https://api.example.com", "1", "n"])
+    )
+    assert cli.interactive() == 0
+    out = capsys.readouterr().out
+    assert "将检测: claude-3" in out
+    assert "并发扫描 1 个模型" in out
+
+
+def test_interactive_model_selection_by_name(monkeypatch, capsys) -> None:
+    """输入模型名模糊匹配。"""
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o", "claude-3"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr(
+        "builtins.input", _interactive_inputs(["https://api.example.com", "claude", "n"])
+    )
+    assert cli.interactive() == 0
+    out = capsys.readouterr().out
+    assert "将检测: claude-3" in out
+
+
+def test_interactive_model_selection_invalid(monkeypatch, capsys) -> None:
+    """无效选择 → 保持自动选择的全部模型。"""
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o", "claude-3", "gemini-pro"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr(
+        "builtins.input", _interactive_inputs(["https://api.example.com", "99,zzz", "n"])
+    )
+    assert cli.interactive() == 0
+    out = capsys.readouterr().out
+    assert "并发扫描 3 个模型" in out
+
+
+def test_interactive_getpass_fallback(monkeypatch, capsys) -> None:
+    """getpass 不可用（无 TTY）→ 回退明文 input。"""
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+
+    def bad_getpass(prompt=""):
+        raise OSError("no tty")
+
+    monkeypatch.setattr(cli.getpass, "getpass", bad_getpass)
+    monkeypatch.setattr(
+        "builtins.input",
+        _interactive_inputs(["sk-test", "https://api.example.com", "", "n"]),
+    )
+    assert cli.interactive() == 0
+
+
+def test_interactive_getpass_interrupt(monkeypatch) -> None:
+    """getpass 抛 KeyboardInterrupt → 向上传播（不吞取消信号）。"""
+
+    def bad_getpass(prompt=""):
+        raise KeyboardInterrupt()
+
+    monkeypatch.setattr(cli.getpass, "getpass", bad_getpass)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
+    with pytest.raises(KeyboardInterrupt):
+        cli.interactive()
+
+
+def test_interactive_model_selection_empty_parts(monkeypatch, capsys) -> None:
+    """选择输入含空段（如 1,,2）时跳过空段。"""
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o", "claude-3", "gemini-pro"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr(
+        "builtins.input", _interactive_inputs(["https://api.example.com", "1,,2", "n"])
+    )
+    assert cli.interactive() == 0
+    out = capsys.readouterr().out
+    assert "将检测: claude-3, gpt-4o" in out
+    assert "并发扫描 2 个模型" in out
 
 
 def test_interactive_persist_failure(monkeypatch, capsys) -> None:
@@ -613,9 +761,8 @@ def test_interactive_persist_failure(monkeypatch, capsys) -> None:
     monkeypatch.setattr("relay_audit.serve.persist_result", bad_persist)
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
-    monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "https://api.example.com", "n"])
-    )
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr("builtins.input", _interactive_inputs(["https://api.example.com", "", "n"]))
     assert cli.interactive() == 0
     assert "保存扫描结果失败" in capsys.readouterr().err
 
@@ -635,9 +782,8 @@ def test_interactive_browser_failure(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "k")
     monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
     monkeypatch.setattr(cli.webbrowser, "open", bad_open)
-    monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["sk-test", "https://api.example.com", "n"])
-    )
+    _mock_getpass(monkeypatch, ["sk-test"])
+    monkeypatch.setattr("builtins.input", _interactive_inputs(["https://api.example.com", "", "n"]))
     assert cli.interactive() == 0
     assert "无法打开浏览器" in capsys.readouterr().err
 
@@ -753,6 +899,13 @@ def test_main_execute_scan_interrupt(monkeypatch) -> None:
 def test_main_missing_base_url(monkeypatch) -> None:
     with pytest.raises(SystemExit) as e:
         cli.main(["--json"])
+    assert e.value.code == 2
+
+
+def test_main_invalid_base_url(monkeypatch) -> None:
+    """--base-url 不带 http(s) 前缀 → 参数错误。"""
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--base-url", "ftp://x", "--json"])
     assert e.value.code == 2
 
 

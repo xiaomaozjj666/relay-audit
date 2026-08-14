@@ -332,6 +332,22 @@ def test_run_scan_stream_exception(fake) -> None:
     assert sr and not sr[0].ok
 
 
+def test_run_scan_progress_output(fake, capsys) -> None:
+    """非 quiet 模式打印实时进度行。"""
+    _scan(_cfg(samples=1))
+    out = capsys.readouterr().out
+    assert "[OK] 基础对话 (" in out
+    assert "[OK] 稳定性_1 (" in out
+    assert "[OK] 突发_1 (" in out
+
+
+def test_run_scan_quiet_no_progress(fake, capsys) -> None:
+    """quiet 模式不打印进度。"""
+    _scan(_cfg(samples=1, quiet=True))
+    out = capsys.readouterr().out
+    assert "[OK]" not in out
+
+
 def test_run_scan_missing_key(fake, monkeypatch) -> None:
     monkeypatch.delenv("RELAY_API_KEY", raising=False)
     with pytest.raises(ValueError, match="RELAY_API_KEY"):

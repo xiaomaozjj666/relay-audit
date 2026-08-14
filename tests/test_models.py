@@ -104,8 +104,21 @@ def test_scan_result_version_default() -> None:
 
 def test_scan_result_to_dict() -> None:
     cfg = ScanConfig(base_url="https://api.example.com", model="gpt-4o")
-    results = [_result(latency_ms=1000)]
-    findings = [Finding(Severity.HIGH, "高危", "detail sk-abc1234567890123456", "identity")]
+    results = [
+        _result(latency_ms=1000),
+        _result(
+            name="失败的",
+            ok=False,
+            status=500,
+            error="HTTP 500 sk-abcdefghijklmnop123456",
+            content="",
+        ),
+    ]
+    findings = [
+        Finding(
+            Severity.HIGH, "高危", "detail sk-abc1234567890123456", "identity", model_name="gpt-4o"
+        )
+    ]
     r = ScanResult(
         cfg, findings, results, [ModelInfo(id="gpt-4o")], "2026-01-01T00:00:00+00:00", 12.5
     )
@@ -121,13 +134,14 @@ def test_scan_result_to_dict() -> None:
         "medium": 0,
         "low": 0,
         "total": 1,
-        "tests": 1,
+        "tests": 2,
     }
     # 脱敏
     assert "sk-abc123" not in d["findings"][0]["detail"]
     assert "[REDACTED]" in d["findings"][0]["detail"]
     assert d["findings"][0]["severity"] == "high"
     assert d["findings"][0]["category"] == "identity"
+    assert d["findings"][0]["model_name"] == "gpt-4o"
 
     t = d["tests"][0]
     assert t["name"] == "t"
@@ -139,3 +153,10 @@ def test_scan_result_to_dict() -> None:
     assert t["tokens_per_second"] == 10.0
     assert t["streaming"] is False
     assert t["turn_count"] == 1
+    assert t["error"] is None
+
+    # 失败测试携带脱敏后的 error
+    t2 = d["tests"][1]
+    assert t2["ok"] is False
+    assert "sk-abcdefghijklmnop123456" not in t2["error"]
+    assert "[REDACTED]" in t2["error"]

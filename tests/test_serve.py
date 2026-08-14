@@ -250,7 +250,9 @@ def test_server_index(http_server) -> None:
     port, _ = http_server
     status, body = _get(port, "/")
     assert status == 200
-    assert "Relay Audit 报告列表" in body.decode("utf-8")
+    text = body.decode("utf-8")
+    assert "Relay Audit 报告列表" in text
+    assert "↻ 刷新" in text  # 刷新入口
 
 
 def test_server_reports_api_and_report(http_server) -> None:
