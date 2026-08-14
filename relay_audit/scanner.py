@@ -126,6 +126,12 @@ async def run_scan(config: ScanConfig) -> ScanResult:
         if not config.quiet:
             print(msg, flush=True)
 
+    def _progress(name: str, r: ChatResult) -> None:
+        """单测完成即打印一行，让长扫描有实时反馈"""
+        if not config.quiet:
+            mark = "[OK]" if r.ok else "[x ]"
+            print(f"    {mark} {name} ({r.latency_ms}ms)", flush=True)
+
     # 全局并发信号量：连接池上限 32，留余量给重试/降级
     _sem = asyncio.Semaphore(8)
 
@@ -463,6 +469,8 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                             )
                         )
 
+                for r_item, _ in results_list:
+                    _progress(r_item.name, r_item)
                 return results_list
 
         # ── 构建全部任务队列（主测试 + 稳定性 + 突发 + 对比，共享信号量） ──
@@ -484,8 +492,25 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         request_timeout=tout,
                     )
                     r.name = f"稳定性_{idx}"
+                    _progress(r.name, r)
                     return [(r, "quality")]
                 except Exception as e:
+                    _progress(
+                        f"稳定性_{idx}",
+                        ChatResult(
+                            f"稳定性_{idx}",
+                            config.model,
+                            False,
+                            0,
+                            0,
+                            "",
+                            str(e),
+                            {},
+                            "",
+                            0,
+                            str(e),
+                        ),
+                    )
                     return [
                         (
                             ChatResult(
@@ -523,9 +548,16 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     out: list[tuple[ChatResult, str]] = []
                     for i, r in enumerate(burst):
                         r.name = f"突发_{i + 1}"
+                        _progress(r.name, r)
                         out.append((r, "quality"))
                     return out
                 except Exception as e:
+                    _progress(
+                        "突发_1",
+                        ChatResult(
+                            "突发_1", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)
+                        ),
+                    )
                     return [
                         (
                             ChatResult(
@@ -557,8 +589,13 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         request_timeout=tout,
                     )
                     r.name = f"对比:{cm}"
+                    _progress(r.name, r)
                     return [(r, "identity")]
                 except Exception as e:
+                    _progress(
+                        f"对比:{cm}",
+                        ChatResult(f"对比:{cm}", cm, False, 0, 0, "", str(e), {}, "", 0, str(e)),
+                    )
                     return [
                         (
                             ChatResult(
@@ -601,9 +638,16 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 )
                 sr.name = "流式响应"
                 sr.turn_count = 3
+                _progress(sr.name, sr)
                 results.append(sr)
                 findings.extend(analyze_chat(sr, "quality"))
             except Exception as e:
+                _progress(
+                    "流式响应",
+                    ChatResult(
+                        "流式响应", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)
+                    ),
+                )
                 results.append(
                     ChatResult(
                         "流式响应",
@@ -627,6 +671,12 @@ async def run_scan(config: ScanConfig) -> ScanResult:
 
         for item in chat_results:
             if isinstance(item, BaseException):
+                _progress(
+                    "异常",
+                    ChatResult(
+                        "异常", config.model, False, 0, 0, "", str(item), {}, "", 0, str(item)
+                    ),
+                )
                 results.append(
                     ChatResult(
                         "异常",

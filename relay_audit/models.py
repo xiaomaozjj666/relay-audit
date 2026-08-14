@@ -147,6 +147,7 @@ class ScanResult:
                     "detail": redact(f.detail),
                     "category": f.category,
                     "reason": redact(f.reason),
+                    "model_name": f.model_name,
                 }
                 for f in self.findings
             ],
@@ -161,6 +162,7 @@ class ScanResult:
                     "tokens_per_second": round(r.tokens_per_second, 1),
                     "streaming": r.streaming,
                     "turn_count": r.turn_count,
+                    "error": redact(r.error or "")[:200] or None,
                 }
                 for r in self.results
             ],

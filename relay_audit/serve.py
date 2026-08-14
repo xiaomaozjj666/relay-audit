@@ -290,6 +290,8 @@ a{color:#1a73e8;text-decoration:none}
 a:hover{text-decoration:underline}
 a.view-btn{display:inline-block;padding:2px 8px;background:#4f46e5;color:#fff !important;border-radius:4px;font-size:11px;font-weight:600;margin-right:4px}
 a.view-btn:hover{background:#4338ca}
+a.refresh-btn{font-size:11px;color:#4f46e5;text-decoration:none;border:1px solid #c7d2fe;padding:2px 10px;border-radius:10px;font-weight:600}
+a.refresh-btn:hover{background:#eef2ff}
 a.json-btn{display:inline-block;padding:2px 8px;background:#f3f4f6;color:#6b7280 !important;border-radius:4px;font-size:11px;font-weight:600}
 a.json-btn:hover{background:#e5e7eb}
 .badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;color:#fff}
@@ -297,7 +299,7 @@ a.json-btn:hover{background:#e5e7eb}
 .empty{color:#999;text-align:center;padding:40px 0}
 .footer{text-align:center;color:#bbb;font-size:11px;margin-top:16px}
 </style></head>
-<body><h1>📋 Relay Audit 报告列表</h1>
+<body><h1>📋 Relay Audit 报告列表 <a href="/" class="refresh-btn">↻ 刷新</a></h1>
 <div id="app">Loading...</div>
 <script>
 fetch('/api/reports').then(r=>r.json()).then(data=>{

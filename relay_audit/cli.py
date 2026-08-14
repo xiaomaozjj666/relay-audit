@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import datetime as dt
+import getpass
 import json
 import os
 import subprocess
@@ -305,10 +306,19 @@ def interactive() -> int:
         print("  +------------------------------------------+")
         print()
 
-        key = input("  [1/3] API Key > ").strip()
+        # API Key 用 getpass 掩码输入（无 TTY 时回退明文 input）
+        def _prompt_key() -> str:
+            try:
+                return getpass.getpass("  [1/3] API Key > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                raise
+            except Exception:
+                return input("  [1/3] API Key > ").strip()
+
+        key = _prompt_key()
         while not key:
             print("  [x] API Key 不能为空")
-            key = input("  [1/3] API Key > ").strip()
+            key = _prompt_key()
         os.environ["RELAY_API_KEY"] = key
 
         if not _load_key_from_file():
@@ -316,10 +326,15 @@ def interactive() -> int:
             if save in ("y", "yes"):
                 _save_key_to_file(key)
 
-        url = input("  [2/3] API 地址 > ").strip()
-        while not url:
-            print("  [x] 地址不能为空")
+        while True:
             url = input("  [2/3] API 地址 > ").strip()
+            if not url:
+                print("  [x] 地址不能为空")
+                continue
+            if not url.startswith(("http://", "https://")):
+                print("  [x] 地址需以 http:// 或 https:// 开头")
+                continue
+            break
 
         print("  [3/3] 正在获取模型列表...")
         try:
@@ -338,6 +353,24 @@ def interactive() -> int:
 
         models_to_test = auto_select_model(ids, top_n=3)
         print(f"\n  自动选择 {len(models_to_test)} 个最强模型: {', '.join(models_to_test)}")
+
+        # 允许用户确认或挑选模型：回车=全部，序号(如 1,2) 或模型名
+        choice = input("  回车全部检测；或输入序号/模型名: ").strip()
+        if choice:
+            chosen: list[str] = []
+            for part in choice.split(","):
+                part = part.strip()
+                if not part:
+                    continue
+                if part.isdigit():
+                    i = int(part)
+                    if 1 <= i <= len(models_to_test):
+                        chosen.append(models_to_test[i - 1])
+                else:
+                    chosen.extend(m for m in ids if part.lower() in m.lower())
+            if chosen:
+                models_to_test = chosen[:3]
+                print(f"  将检测: {', '.join(models_to_test)}")
 
         print(f"  [i] 并发扫描 {len(models_to_test)} 个模型...", flush=True)
 
@@ -549,6 +582,8 @@ def main(argv: list[str] | None = None) -> int:
 
     if not args.base_url:
         ap.error("--base-url 是必填参数")
+    if not args.base_url.startswith(("http://", "https://")):
+        ap.error("--base-url 需以 http:// 或 https:// 开头")
 
     if args.key:
         os.environ[args.api_key_env or "RELAY_API_KEY"] = args.key
