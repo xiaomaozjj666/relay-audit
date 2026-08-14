@@ -79,8 +79,10 @@ def test_save_key_win32_icacls_fails(monkeypatch, tmp_path, capsys) -> None:
 
 
 def test_key_path_default(monkeypatch) -> None:
-    monkeypatch.setattr(cli.os.path, "expanduser", lambda p: r"C:\Users\t\home")
-    assert cli._key_path() == r"C:\Users\t\home\.relay_key"
+    # 用 os.path.join 构造期望值：Windows 反斜杠 / POSIX 斜杠 由平台决定
+    home = os.path.join("Users", "t", "home")
+    monkeypatch.setattr(cli.os.path, "expanduser", lambda p: home)
+    assert cli._key_path() == os.path.join(home, ".relay_key")
 
 
 def test_load_key_from_file_oserror(monkeypatch, tmp_path, capsys) -> None:
