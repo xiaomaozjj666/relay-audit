@@ -12,7 +12,7 @@
 - **质量检测** — 基础对话、指令遵循、多轮对话、长上下文、编码一致性、乱码检测、Token 计费校验；JSON 模式与 Function Calling 失败时自动降级为纯文本重试
 - **性能评估** — 延迟统计（p50 / p95 / p99 / 抖动）、稳定性采样、并发突发测试、流式响应（SSE）测试
 - **模型对比** — `--compare` 并排对比多个模型的真实身份与响应
-- **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到 `reports/`
+- **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到报告目录（Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`，可用环境变量 `RELAY_AUDIT_REPORTS_DIR` 覆盖；默认自动清理 7 天前的旧报告，`RELAY_AUDIT_REPORT_TTL_DAYS=0` 可关闭）
 - **历史报告浏览** — 内置本地 Web 服务器，在浏览器中浏览往期 HTML / JSON 扫描报告
 - **隐私与安全** — 报告与日志中 API Key 自动脱敏；`--save-key` 以受限权限（Linux/macOS `0o600`，Windows 经 `icacls`）保存在本地
 
@@ -124,6 +124,8 @@ relay-audit --serve 8080
 | 变量 | 说明 |
 |------|------|
 | `RELAY_API_KEY` | API Key（也可用 `--key` 或 `--save-key` 提供） |
+| `RELAY_AUDIT_REPORTS_DIR` | 报告目录（默认 Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`） |
+| `RELAY_AUDIT_REPORT_TTL_DAYS` | 旧报告自动清理天数（默认 7，设 `0` 表示永不清理） |
 
 如需使用其他环境变量名，通过 `--api-key-env <NAME>` 指定。
 

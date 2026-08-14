@@ -39,4 +39,4 @@ jobs:
           pip install -r requirements-dev.txt
           pip install -e .
       - name: Run tests
-        run: pytest --cov=relay_audit --cov-report=term --cov-report=xml
+        run: pytest --cov=relay_audit --cov-report=term --cov-report=xml --cov-fail-under=95
