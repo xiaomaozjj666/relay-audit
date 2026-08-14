@@ -144,7 +144,7 @@ def analyze_model_swap(requested_model: str, models: list[ModelInfo]) -> list[Fi
     if not requested_model or not models:
         return fs
     ids = [m.id for m in models]
-    if not ids:
+    if not ids:  # pragma: no cover — models 非空时 ids 必非空
         return fs
 
     req_lower = requested_model.lower()
@@ -181,7 +181,7 @@ def analyze_model_swap(requested_model: str, models: list[ModelInfo]) -> list[Fi
     return fs
 
 
-def analyze_error_pattern(results: list[ChatResult], config_model: str) -> list[Finding]:
+def analyze_error_pattern(results: list[ChatResult]) -> list[Finding]:
     """分析测试结果中的错误模式 — 检测中转站批量失败"""
     fs: list[Finding] = []
     if not results:
@@ -559,7 +559,9 @@ def analyze_stability(contents: list[str], lats: list[int]) -> list[Finding]:
         return fs
     min_lat, max_lat = min(lats), max(lats)
     avg_lat = sum(lats) / len(lats)
-    if max_lat > max(8000, min_lat * 10 if min_lat else 99999):
+    # min_lat=0（首包极快/计时异常）时退化为固定阈值 8000ms
+    threshold = max(8000, min_lat * 10) if min_lat else 8000
+    if max_lat > threshold:
         fs.append(
             Finding(
                 Severity.LOW,

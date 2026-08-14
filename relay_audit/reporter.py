@@ -21,6 +21,12 @@ from relay_audit.patterns import (
     short,
 )
 
+# 旧报告保留天数（0 = 永不清理）。可用环境变量 RELAY_AUDIT_REPORT_TTL_DAYS 覆盖。
+try:
+    REPORT_TTL_DAYS = max(0, int(os.environ.get("RELAY_AUDIT_REPORT_TTL_DAYS", "7") or 0))
+except ValueError:
+    REPORT_TTL_DAYS = 7
+
 # ═══════════════════════════════════════════════════════════════
 # 通过率计算
 # ═══════════════════════════════════════════════════════════════
@@ -30,8 +36,16 @@ def _is_diagnostic(r: ChatResult) -> bool:
     return any(r.name.startswith(p) for p in DIAGNOSTIC_PREFIXES)
 
 
+def _is_safety_test(r: ChatResult) -> bool:
+    return r.name in SAFETY_TEST_NAMES
+
+
 def _is_safety_refused(r: ChatResult) -> bool:
-    return r.name in SAFETY_TEST_NAMES and not r.ok and r.status in REFUSED_STATUS
+    """安全测试被服务端拒绝（HTTP 4xx/5xx）视为正常拒绝。
+
+    注意 status=0（超时/连接失败）不算拒绝，避免通过率虚高。
+    """
+    return _is_safety_test(r) and not r.ok and r.status in REFUSED_STATUS
 
 
 def _is_refused_by_pattern(r: ChatResult) -> bool:
@@ -39,11 +53,17 @@ def _is_refused_by_pattern(r: ChatResult) -> bool:
 
 
 def compute_pass_rate(results: list[ChatResult]) -> tuple[int, int]:
-    """计算通过率 (effective_ok, total)。诊断测试不计入分母。"""
+    """计算通过率 (effective_ok, total)。诊断测试不计入分母。
+
+    拒绝即通过仅对安全类测试生效：普通测试失败时，即使错误文案
+    包含"抱歉/不能"等字样也不计入通过（错误提示 ≠ 模型拒答）。
+    """
     graded = [r for r in results if not _is_diagnostic(r)]
     total = len(graded)
     effective_ok = sum(
-        1 for r in graded if r.ok or _is_safety_refused(r) or _is_refused_by_pattern(r)
+        1
+        for r in graded
+        if r.ok or _is_safety_refused(r) or (_is_safety_test(r) and _is_refused_by_pattern(r))
     )
     return effective_ok, total
 
@@ -59,7 +79,7 @@ def esc(text: str) -> str:
 
 def _reports_dir() -> str:
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    _clean_old_reports(str(REPORTS_DIR), days=7)
+    _clean_old_reports(str(REPORTS_DIR), days=REPORT_TTL_DAYS)
     return str(REPORTS_DIR)
 
 
@@ -80,9 +100,9 @@ def _print_plain(result: ScanResult) -> None:
     for f in result.findings:
         sev = SEV_CN.get(f.severity.value, f.severity.value)
         cat = CAT_CN.get(f.category, f.category)
-        reason = f" | {f.reason}" if f.reason else ""
-        print(f"  [{sev}][{cat}] {f.title}{reason}")
-        print(f"       {f.detail}")
+        reason = f" | {redact(f.reason)}" if f.reason else ""
+        print(f"  [{sev}][{cat}] {redact(f.title)}{reason}")
+        print(f"       {short(f.detail, 300)}")
     if not result.findings:
         print("  [OK] 未发现异常")
     ok = [r for r in result.results if r.ok]
@@ -730,7 +750,10 @@ def save_report(result: ScanResult, output_path: str | None = None) -> str:
     return output_path
 
 
-def _clean_old_reports(dir_path: str, days: int = 7) -> None:
+def _clean_old_reports(dir_path: str, days: int = REPORT_TTL_DAYS) -> None:
+    """删除超过 days 天的旧报告；days <= 0 表示永不清理。"""
+    if days <= 0:
+        return
     cutoff = dt.datetime.now().timestamp() - days * 86400
     try:
         for f in os.listdir(dir_path):

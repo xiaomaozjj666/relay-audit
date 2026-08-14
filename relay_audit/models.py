@@ -6,6 +6,9 @@ import dataclasses
 from enum import Enum
 from typing import Any
 
+from relay_audit._version import __version__
+from relay_audit.patterns import redact
+
 
 class Severity(Enum):
     """发现严重等级"""
@@ -19,16 +22,6 @@ class Severity(Enum):
     @property
     def rank(self) -> int:
         return {"critical": 4, "high": 3, "medium": 2, "low": 1, "info": 0}.get(self.value, 0)
-
-    @property
-    def emoji(self) -> str:
-        return {
-            "critical": "***",
-            "high": "**",
-            "medium": "*",
-            "low": "-",
-            "info": "i",
-        }.get(self.value, "?")
 
 
 @dataclasses.dataclass
@@ -110,7 +103,7 @@ class ScanResult:
     models: list[ModelInfo]
     started_at: str
     duration_s: float
-    version: str = "2.1.0"
+    version: str = __version__
 
     @property
     def high_count(self) -> int:
@@ -150,9 +143,10 @@ class ScanResult:
             "findings": [
                 {
                     "severity": f.severity.value,
-                    "title": f.title,
-                    "detail": f.detail,
+                    "title": redact(f.title),
+                    "detail": redact(f.detail),
                     "category": f.category,
+                    "reason": redact(f.reason),
                 }
                 for f in self.findings
             ],

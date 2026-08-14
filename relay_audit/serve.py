@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import html as htmlmod
 import json
 import mimetypes
@@ -16,6 +17,7 @@ from typing import Any
 from urllib.parse import unquote
 
 from relay_audit import REPORTS_DIR
+from relay_audit.patterns import redact
 
 
 def _safe_path(name: str) -> str:
@@ -39,13 +41,16 @@ def persist_result(result: Any, base_url: str) -> str:
     """Save scan result as JSON to reports/ and return the file path."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-    safe_url = base_url.replace("://", "_").replace("/", "_").replace(":", "_")[:40]
-    filename = f"scan_{ts}_{safe_url}.json"
+    # 仅保留安全字符（Windows 文件名不允许 ? & * 等）
+    safe_url = re.sub(r"[^A-Za-z0-9._-]", "_", base_url)[:40]
+    # 加入 URL 哈希，避免同前缀 URL 的文件名碰撞覆盖
+    digest = hashlib.sha1(base_url.encode("utf-8")).hexdigest()[:8]
+    filename = f"scan_{ts}_{digest}_{safe_url}.json"
     filepath = REPORTS_DIR / filename
 
     data = {
         "timestamp": ts,
-        "base_url": base_url,
+        "base_url": redact(base_url),
         "summary": {
             "risk_level": result.risk_level,
             "high_count": result.high_count,
@@ -57,8 +62,8 @@ def persist_result(result: Any, base_url: str) -> str:
             {
                 "severity": f.severity.value,
                 "category": f.category,
-                "title": f.title,
-                "reason": f.reason,
+                "title": redact(f.title),
+                "reason": redact(f.reason),
             }
             for f in result.findings
         ],
@@ -68,7 +73,7 @@ def persist_result(result: Any, base_url: str) -> str:
                 "ok": r.ok,
                 "latency_ms": r.latency_ms,
                 "status": r.status,
-                "content_preview": (r.content or "")[:200],
+                "content_preview": redact(r.content or "")[:200],
             }
             for r in result.results
         ],
@@ -93,6 +98,7 @@ def list_json_reports() -> list[dict]:
                     "type": "json",
                     "file": f.name,
                     "timestamp": data.get("timestamp", ""),
+                    "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(data.get("base_url", "") or ""),
                     "risk_level": data.get("summary", {}).get("risk_level", ""),
                     "findings": data.get("summary", {}).get("total_findings", 0),
@@ -136,7 +142,8 @@ def list_html_reports() -> list[dict]:
                 dp, tp = name_match.group(1), name_match.group(2)
                 ts_from_name = f"{dp[:4]}-{dp[4:6]}-{dp[6:8]} {tp[:2]}:{tp[2:4]}:{tp[4:6]}"
 
-            base_url = url_match.group(1).strip() if url_match else f.name
+            # base_url 在 HTML 中已被 esc() 转义，先还原再统一转义一次，避免双重转义
+            base_url = htmlmod.unescape(url_match.group(1).strip()) if url_match else f.name
             risk = ""
             if risk_match:
                 risk_text = risk_match.group(1)
@@ -155,6 +162,7 @@ def list_html_reports() -> list[dict]:
                     "type": "html",
                     "file": f.name,
                     "timestamp": ts_from_name,
+                    "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(base_url),
                     "risk_level": risk,
                     "findings": findings_count,
@@ -168,9 +176,13 @@ def list_html_reports() -> list[dict]:
 
 
 def list_reports() -> list[dict]:
-    """Return merged sorted list of all reports (HTML first, then JSON by time)."""
+    """Return merged sorted list of all reports (newest first).
+
+    HTML 与 JSON 的时间戳格式不同（带分隔符 vs 纯数字），字符串比较会错序，
+    因此按文件 mtime 排序。
+    """
     all_reports = list_html_reports() + list_json_reports()
-    all_reports.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+    all_reports.sort(key=lambda x: x.get("mtime", 0.0), reverse=True)
     return all_reports
 
 
@@ -178,28 +190,31 @@ def list_reports() -> list[dict]:
 # mtime 缓存：避免每次请求都重新解析所有报告文件
 # ═══════════════════════════════════════════════════════════════
 
-_reports_cache: tuple[float, list[dict]] = (0, [])
+_reports_cache: tuple[float, frozenset[str], list[dict]] = (0, frozenset(), [])
 
 
 def list_reports_cached() -> list[dict]:
-    """Return cached report list, invalidated when any report file changes."""
+    """Return cached report list, invalidated when any report file changes.
+
+    文件被删除（清理）也会使缓存失效——仅比较 mtime 无法感知删除。
+    """
     global _reports_cache
     mtime = 0.0
+    names: set[str] = set()
     if REPORTS_DIR.is_dir():
         try:
             for f in REPORTS_DIR.iterdir():
                 if f.is_file() and (
-                    f.name.startswith("scan_")
-                    and f.name.endswith(".json")
-                    or f.name.startswith("relay_report_")
-                    and f.name.endswith(".html")
+                    (f.name.startswith("scan_") and f.name.endswith(".json"))
+                    or (f.name.startswith("relay_report_") and f.name.endswith(".html"))
                 ):
+                    names.add(f.name)
                     mtime = max(mtime, f.stat().st_mtime)
         except OSError:
             mtime = time.time()
-    if mtime > _reports_cache[0]:
-        _reports_cache = (mtime, list_reports())
-    return _reports_cache[1]
+    if names != set(_reports_cache[1]) or mtime > _reports_cache[0]:
+        _reports_cache = (mtime, frozenset(names), list_reports())
+    return _reports_cache[2]
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):

@@ -7,6 +7,7 @@ import asyncio
 import datetime as dt
 import json
 import os
+import subprocess
 import sys
 import webbrowser
 from pathlib import Path
@@ -38,23 +39,20 @@ def _load_key_from_file() -> str:
 def _save_key_to_file(key: str) -> None:
     kf = _key_path()
     if sys.platform == "win32":
-        import stat
-
-        with open(kf, "w", encoding="utf-8") as f:
+        # 先写入临时文件 → icacls 收紧权限 → 原子替换为最终文件，
+        # 避免最终文件存在"明文 + 宽松权限"的窗口期
+        kf_tmp = kf + ".tmp"
+        with open(kf_tmp, "w", encoding="utf-8") as f:
             f.write(key)
         try:
-            import subprocess
-
             subprocess.run(
-                ["icacls", kf, "/inheritance:r", "/grant:r", f"{os.getlogin()}:F"],
+                ["icacls", kf_tmp, "/inheritance:r", "/grant:r", f"{os.getlogin()}:F"],
                 capture_output=True,
                 check=False,
             )
         except Exception:
-            try:
-                os.chmod(kf, stat.S_IREAD | stat.S_IWRITE)
-            except Exception:
-                print("  [!] 无法设置密钥文件权限", file=sys.stderr)
+            print("  [!] 无法设置密钥文件权限", file=sys.stderr)
+        os.replace(kf_tmp, kf)
     else:
         fd = os.open(kf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -231,7 +229,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
             print("  [x] 无法获取模型列表，请用 --model 手动指定", file=sys.stderr)
             return 2, "", None
         selected = auto_select_model(ids)
-        if not selected:
+        if not selected:  # pragma: no cover — 非空 ids 时 auto_select_model 总会选出模型
             print("  [x] 无法自动选择模型，请用 --model 手动指定", file=sys.stderr)
             return 2, "", None
         config.model = selected[0]
@@ -266,7 +264,8 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     if report_path:
         print(f"  报告: {report_path}")
         try:
-            webbrowser.open(Path(report_path).as_uri())
+            # as_uri() 要求绝对路径（相对路径在 Windows 上会抛 ValueError）
+            webbrowser.open(Path(report_path).resolve().as_uri())
         except Exception:
             print("  [!] 无法打开浏览器", file=sys.stderr)
 
@@ -395,7 +394,7 @@ def interactive() -> int:
             report_path = save_report(final_result)
             print(f"  报告: {report_path}")
             try:
-                webbrowser.open(Path(report_path).as_uri())
+                webbrowser.open(Path(report_path).resolve().as_uri())
             except Exception:
                 print("  [!] 无法打开浏览器", file=sys.stderr)
         except Exception as e:
@@ -571,5 +570,5 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover — 入口守卫，由 relay_audit/__main__.py 覆盖
     raise SystemExit(main())

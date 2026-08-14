@@ -11,11 +11,32 @@
 - serve: HTTP 报告浏览服务器
 """
 
+import os
+import sys
 from pathlib import Path
 
-__version__ = "2.1.0"
+from ._version import __version__
 
-REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
+
+def _default_reports_dir() -> Path:
+    """报告目录：优先环境变量，其次用户数据目录。
+
+    - RELAY_AUDIT_REPORTS_DIR=<path> 显式指定
+    - Windows: %LOCALAPPDATA%/relay-audit/reports
+    - Linux/macOS: ~/.relay_audit/reports
+
+    不使用包安装位置上级目录，避免 pip 安装后写入 site-packages。
+    """
+    env = os.environ.get("RELAY_AUDIT_REPORTS_DIR", "").strip()
+    if env:
+        return Path(env).expanduser().resolve()
+    if sys.platform == "win32":
+        base = os.environ.get("LOCALAPPDATA") or str(Path.home())
+        return Path(base) / "relay-audit" / "reports"
+    return Path.home() / ".relay_audit" / "reports"
+
+
+REPORTS_DIR = _default_reports_dir()
 
 from relay_audit.analysis import (
     analyze_chat,
@@ -67,6 +88,7 @@ from relay_audit.scanner import (
 )
 
 __all__ = [
+    "__version__",
     # models
     "ChatResult",
     "Finding",

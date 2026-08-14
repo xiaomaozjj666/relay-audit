@@ -40,13 +40,10 @@ def _parse_chat_response(
                     content = json.dumps(msg["tool_calls"], ensure_ascii=False)
         if not content:
             err = parsed.get("error", {})
-            content = (
-                json.dumps(err, ensure_ascii=False)
-                if isinstance(err, dict)
-                else str(err)
-                if err
-                else ""
-            )
+            if isinstance(err, dict) and err:
+                content = json.dumps(err, ensure_ascii=False)
+            elif not isinstance(err, dict) and err:
+                content = str(err)
     return ChatResult(
         "",
         model,
@@ -94,7 +91,8 @@ class ApiClient:
             base_url=self.base,
             headers=self.headers,
             timeout=httpx.Timeout(self.timeout, connect=15.0),
-            limits=httpx.Limits(max_keepalive_connections=16, max_connections=32),
+            # 连接池上限需覆盖 8 路信号量 × 突发 5 路并发的峰值（40）
+            limits=httpx.Limits(max_keepalive_connections=32, max_connections=64),
         )
         return self
 
@@ -171,7 +169,8 @@ class ApiClient:
                 lat = time.perf_counter() - t0
                 return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e))
 
-        return ChatResult(
+        # 所有路径在上面均已 return，此处为防御性兜底
+        return ChatResult(  # pragma: no cover
             "",
             model,
             False,
