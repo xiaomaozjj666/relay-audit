@@ -197,12 +197,17 @@ def show_models_table(model_ids: list[str]) -> None:
 
 
 def _build_config(args: argparse.Namespace) -> ScanConfig:
+    # samples 支持 0（不采样）；配置文件传入字符串时做健壮转换
+    try:
+        samples = int(args.samples) if args.samples is not None else 2
+    except (TypeError, ValueError):
+        samples = 2
     return ScanConfig(
         base_url=args.base_url,
         model=args.model or "",
         api_key_env=args.api_key_env or "RELAY_API_KEY",
         timeout=args.timeout or 60,
-        samples=args.samples or 2,
+        samples=samples,
         compare=[m for m in (args.compare or []) if m],
         quick=bool(args.quick),
         stream=bool(args.stream),
@@ -216,6 +221,10 @@ def _build_config(args: argparse.Namespace) -> ScanConfig:
 
 def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     """加载 key 并执行扫描"""
+    # --json 时抑制进度/日志输出，保证 stdout 只有 JSON（管道可解析）
+    if config.json_output:
+        config.quiet = True
+
     key = os.environ.get(config.api_key_env, "") or _load_key_from_file()
     if not key:
         print("错误: API Key 未设置（通过环境变量或 --key）", file=sys.stderr)
@@ -224,7 +233,8 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     os.environ[config.api_key_env] = key
 
     if not config.model:
-        print("  [i] 未指定模型，正在获取模型列表...")
+        if not config.quiet:
+            print("  [i] 未指定模型，正在获取模型列表...")
         ids = asyncio.run(fetch_models(config.base_url, key, config.timeout))
         if not ids:
             print("  [x] 无法获取模型列表，请用 --model 手动指定", file=sys.stderr)
@@ -235,7 +245,8 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
             return 2, "", None
         config.model = selected[0]
         config.model_ids = ids  # 避免 run_scan 再次请求 /v1/models
-        print(f"  [i] 自动选择模型: {selected[0]}")
+        if not config.quiet:
+            print(f"  [i] 自动选择模型: {selected[0]}")
 
     result = asyncio.run(run_scan(config))
 
@@ -497,7 +508,7 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--timeout", type=int, default=60, help="请求超时秒数 (默认 60)")
     ap.add_argument("--samples", type=int, default=2, help="稳定性采样次数 (默认 2)")
     ap.add_argument("--compare", action="append", default=[], help="对比模型（可多次使用）")
-    ap.add_argument("--quick", action="store_true", help="快速模式（跳过安全测试）")
+    ap.add_argument("--quick", action="store_true", help="快速模式（跳过高级与部分安全测试）")
     ap.add_argument("--stream", action="store_true", help="启用流式响应测试")
     ap.add_argument("--json", action="store_true", help="输出 JSON 格式结果")
     ap.add_argument("--output", help="报告输出路径")
@@ -551,7 +562,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.serve is not None:
         from .serve import run_server
 
-        run_server(port=args.serve, open_browser=True)
+        try:
+            run_server(port=args.serve, open_browser=True)
+        except OSError as e:
+            print(
+                f"  [x] 无法启动报告服务器：端口 {args.serve} 可能被占用 ({e})",
+                file=sys.stderr,
+            )
+            return 1
         return 0
 
     if args.config:

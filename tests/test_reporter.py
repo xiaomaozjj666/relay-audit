@@ -254,6 +254,7 @@ def test_generate_html() -> None:
         results=[
             _r(name="基础对话", ok=True, latency_ms=320),
             _r(name="拒绝-破坏性", ok=False, status=400),
+            _r(name="基础对话2", ok=False, status=500, error="HTTP 500: internal", content=""),
             _r(name="流式响应", ok=True, latency_ms=500, streaming=True),
             _r(name="突发_1", ok=False, status=0),  # 诊断测试
         ],
@@ -269,6 +270,9 @@ def test_generate_html() -> None:
     assert "Relay Audit v" in html
     assert "失败测试" in html
     assert "通过测试" in html
+    # 失败测试的可展开错误详情
+    assert "错误详情" in html
+    assert "HTTP 500: internal" in html
 
 
 def test_generate_html_no_issues() -> None:

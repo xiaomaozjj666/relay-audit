@@ -132,7 +132,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             mark = "[OK]" if r.ok else "[x ]"
             print(f"    {mark} {name} ({r.latency_ms}ms)", flush=True)
 
-    # 全局并发信号量：连接池上限 32，留余量给重试/降级
+    # 全局并发信号量：连接池上限 64，留余量给重试/降级
     _sem = asyncio.Semaphore(8)
 
     async with ApiClient(config.base_url, key, config.timeout) as client:

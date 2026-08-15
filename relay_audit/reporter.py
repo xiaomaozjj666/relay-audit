@@ -408,6 +408,12 @@ def generate_html(result: ScanResult) -> str:
             else ""
         )
         preview = _response_preview(r.content, 80)
+        err_detail = ""
+        if row_cls == "fail" and r.error:
+            err_detail = (
+                f'<details class="err-detail"><summary>错误详情</summary>'
+                f"<code>{esc(r.error)}</code></details>"
+            )
         tps = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
         model_ret = esc(r.model_ret) if r.model_ret else "-"
         return (
@@ -416,7 +422,7 @@ def generate_html(result: ScanResult) -> str:
             f'<td><span class="s-{s_cls}">{s_tag}</span></td>'
             f'<td class="n">{r.latency_ms}ms{bar}</td>'
             f'<td class="n">{tps}</td>'
-            f'<td class="rp">{preview}</td>'
+            f'<td class="rp">{preview}{err_detail}</td>'
             f'<td class="n model-col">{model_ret}</td>'
             f"</tr>\n"
         )
@@ -656,6 +662,33 @@ details[open] summary::before {{ transform: rotate(90deg) }}
   background: #f8fafc;
   padding: 2px 5px;
   border-radius: 3px;
+  font-size: 11px;
+}}
+.err-detail {{
+  margin-top: 4px;
+  font-size: 11px;
+}}
+.err-detail summary {{
+  cursor: pointer;
+  color: var(--red);
+  padding: 2px 6px;
+  background: #fef2f2;
+  border-radius: 3px;
+  border: 1px solid #fecaca;
+  user-select: none;
+  list-style: none;
+  display: inline-block;
+}}
+.err-detail summary::-webkit-details-marker {{ display: none }}
+.err-detail code {{
+  display: block;
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  word-break: break-all;
+  white-space: pre-wrap;
   font-size: 11px;
 }}
 .r {{ font-size: 10px; color: var(--muted); display: block; margin-top: 1px }}

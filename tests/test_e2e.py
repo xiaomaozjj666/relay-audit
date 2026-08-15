@@ -120,6 +120,31 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
     assert "sk-e2e-test" not in json.dumps(data)
 
 
+def test_cli_json_output_pure(mock_api, monkeypatch, tmp_path, capsys) -> None:
+    """--json 模式：真实 run_scan 的进度行不得污染 stdout（管道可解析）。"""
+    monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
+    import relay_audit.reporter as reporter
+    import relay_audit.serve as serve
+
+    monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path / "reports")
+
+    ec, _, _ = cli.execute_scan(
+        cli._build_config(
+            cli.build_parser().parse_args(
+                ["--base-url", mock_api, "--model", "gpt-4o", "--json", "--no-html"]
+            )
+        )
+    )
+    assert ec == 0
+    out = capsys.readouterr().out
+    data = json.loads(out)  # 能整体解析 = 无进度行污染
+    assert data["model"] == "gpt-4o"
+    assert "[OK]" not in out
+    assert "[i]" not in out
+
+
 def test_cli_end_to_end_dangerous_model(mock_api, monkeypatch, tmp_path) -> None:
     """mock 模型对危险请求不拒绝 → 产生高危发现 → 退出码 1。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")

@@ -254,6 +254,8 @@ def test_server_index(http_server) -> None:
     text = body.decode("utf-8")
     assert "Relay Audit 报告列表" in text
     assert "↻ 刷新" in text  # 刷新入口
+    assert 'id="filter"' in text  # 搜索过滤框
+    assert "按目标 / 风险 / 类型过滤" in text
 
 
 def test_server_reports_api_and_report(http_server) -> None:

@@ -298,13 +298,22 @@ a.json-btn:hover{background:#e5e7eb}
 .badge-HIGH{background:#e74c3c}.badge-MEDIUM{background:#f39c12}.badge-LOW{background:#27ae60}.badge-UNKNOWN{background:#9ca3af}
 .empty{color:#999;text-align:center;padding:40px 0}
 .footer{text-align:center;color:#bbb;font-size:11px;margin-top:16px}
+.filter-bar{margin-bottom:12px;display:flex;gap:8px;align-items:center}
+#filter{flex:1;max-width:420px;padding:8px 12px;border:1px solid #ddd;border-radius:8px;font-size:13px;outline:none}
+#filter:focus{border-color:#4f46e5}
+#count{font-size:12px;color:#888}
 </style></head>
 <body><h1>📋 Relay Audit 报告列表 <a href="/" class="refresh-btn">↻ 刷新</a></h1>
+<div class="filter-bar"><input id="filter" placeholder="按目标 / 风险 / 类型过滤..." oninput="render()"><span id="count"></span></div>
 <div id="app">Loading...</div>
 <script>
-fetch('/api/reports').then(r=>r.json()).then(data=>{
+let all=[];
+function render(){
+  const q=document.getElementById('filter').value.trim().toLowerCase();
+  const data=q?all.filter(r=>((r.base_url||'')+' '+(r.risk_level||'')+' '+r.type).toLowerCase().includes(q)):all;
+  document.getElementById('count').textContent=data.length+' / '+all.length+' 条';
   if(!data.length){
-    document.getElementById('app').innerHTML='<div class="empty"><p>暂无报告</p><p style="margin-top:8px;font-size:12px;color:#999">运行 <code>relay-audit --base-url https://...</code> 生成报告</p></div>';
+    document.getElementById('app').innerHTML='<div class="empty"><p>暂无匹配报告</p></div>';
     return;
   }
   const html='<table><tr><th style="width:140px">时间</th><th>目标</th><th style="width:70px">风险</th><th style="width:60px">操作</th></tr>'+
@@ -319,6 +328,14 @@ fetch('/api/reports').then(r=>r.json()).then(data=>{
         '<td>'+actions+'</td></tr>';
     }).join('')+'</table>';
   document.getElementById('app').innerHTML=html;
+}
+fetch('/api/reports').then(r=>r.json()).then(data=>{
+  if(!data.length){
+    document.getElementById('app').innerHTML='<div class="empty"><p>暂无报告</p><p style="margin-top:8px;font-size:12px;color:#999">运行 <code>relay-audit --base-url https://...</code> 生成报告</p></div>';
+    return;
+  }
+  all=data;
+  render();
 });
 </script>
 <div class="footer">Relay Audit · 点击查看按钮在新标签页打开 HTML 报告</div></body></html>"""

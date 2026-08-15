@@ -214,6 +214,29 @@ def test_build_config() -> None:
     assert c.config_file == "c.json"
 
 
+def test_build_config_samples_zero_and_str() -> None:
+    """--samples 0 不被默认值吞掉；配置文件字符串 samples 做健壮转换。"""
+    ap = cli.build_parser()
+    args = ap.parse_args(["--base-url", "https://x", "--samples", "0"])
+    assert cli._build_config(args).samples == 0
+
+    args2 = ap.parse_args(["--base-url", "https://x"])
+    args2.samples = "3"  # 模拟配置文件传入字符串
+    assert cli._build_config(args2).samples == 3
+
+    args3 = ap.parse_args(["--base-url", "https://x"])
+    args3.samples = "abc"
+    assert cli._build_config(args3).samples == 2  # 非法值回退默认
+
+
+def test_quick_help_text_accurate() -> None:
+    """--quick 帮助文本与实际行为一致（只跳过部分安全测试）。"""
+    ap = cli.build_parser()
+    quick = [a for a in ap._actions if a.dest == "quick"][0]
+    assert "高级" in quick.help
+    assert "部分安全" in quick.help
+
+
 # ── load_config ─────────────────────────────────────────────
 
 
@@ -351,7 +374,10 @@ def test_execute_scan_high_exit_code(monkeypatch) -> None:
 
 
 def test_execute_scan_json_output(monkeypatch, capsys) -> None:
+    """--json 时 run_scan 被静默（stdout 只有 JSON，无进度行污染）。"""
+
     async def fake_run_scan(cfg):
+        assert cfg.quiet is True  # json_output → quiet
         return _scan_result(high=0)
 
     monkeypatch.setattr(cli, "run_scan", fake_run_scan)
@@ -363,6 +389,7 @@ def test_execute_scan_json_output(monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     data = json.loads(out)
     assert data["risk_level"] == "LOW"
+    assert "[OK]" not in out and "[i]" not in out  # 无进度/日志污染
 
 
 def test_execute_scan_warnings(monkeypatch, capsys) -> None:
@@ -825,6 +852,18 @@ def test_main_serve(monkeypatch) -> None:
     assert captured == {"port": 4321, "open": True}
     assert cli.main(["--serve"]) == 0
     assert captured["port"] == 8080
+
+
+def test_main_serve_port_busy(monkeypatch, capsys) -> None:
+    """端口被占用 → 友好提示并返回 1，不裸抛 traceback。"""
+
+    def busy(port, open_browser=True):
+        raise OSError("address in use")
+
+    monkeypatch.setattr("relay_audit.serve.run_server", busy)
+    assert cli.main(["--serve", "9999"]) == 1
+    err = capsys.readouterr().err
+    assert "端口 9999 可能被占用" in err
 
 
 def test_main_config_merge(monkeypatch, tmp_path) -> None:
