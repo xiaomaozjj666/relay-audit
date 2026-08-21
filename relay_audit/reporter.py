@@ -1,4 +1,4 @@
-"""报告生成 — HTML / 终端 / JSON，对标 api-relay-audit 的 reporter.py"""
+"""报告生成 — HTML / 终端 / JSON，对标 relay-audit 的 reporter.py"""
 
 from __future__ import annotations
 

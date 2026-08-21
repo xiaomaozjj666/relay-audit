@@ -1,4 +1,4 @@
-"""数据类型定义 — 对标 api-relay-audit 的数据模型层"""
+"""数据类型定义 — 对标 relay-audit 的数据模型层"""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""分析检测逻辑 — 对标 api-relay-audit 的 error_diagnosis / latency_variance 等"""
+"""分析检测逻辑 — 对标 relay-audit 的 error_diagnosis / latency_variance 等"""
 
 from __future__ import annotations
 
@@ -26,7 +26,7 @@ def mojibake_score(text: str) -> float:
     if not text.strip():
         return 0.0
     bad = 0
-    bad += len(re.findall(r"[�￾-]", text))
+    bad += len(re.findall(r"[�￾\u0080-\u009f]", text))
     cjk = len(re.findall(r"[一-鿿]", text))
     weird_latin = len(re.findall(r"[À-ɏ]{2,}", text))
     if weird_latin > 3 and cjk == 0:

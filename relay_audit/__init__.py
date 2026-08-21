@@ -1,6 +1,6 @@
 """Relay Audit - OpenAI-compatible 中转 API 安全与质量检测工具
 
-对标 GitHub api-relay-audit 项目架构，模块化设计：
+对标 GitHub relay-audit 项目架构，模块化设计：
 - models: 数据模型 (Severity, Finding, ChatResult, ScanConfig, ScanResult)
 - patterns: 检测模式 & 常量 (危险内容、模型名、代理头、拒绝模式)
 - analysis: 分析逻辑 (乱码、模型、响应头、Token、安全、稳定性、并发)
