@@ -1,8 +1,37 @@
 # Relay Audit
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB" alt="Python 3.10+" />
+  <img src="https://img.shields.io/badge/httpx-async-0F6B9E" alt="httpx" />
+  <img src="https://img.shields.io/badge/rich-terminal-FFC300" alt="rich" />
+  <img src="https://img.shields.io/badge/tests-pytest-brightgreen" alt="pytest" />
+  <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
+</p>
+
 **OpenAI 兼容中转 API 安全与质量检测工具** — 只需提供 API Key 和地址，即可一键完成中转服务的安全审计、身份验证、质量检测与性能评估，并生成可视化报告。
 
 适用于购买或接入第三方中转 API 前的评估，以及自建中转站的日常运维巡检。
+
+## 一键检测流程
+
+```mermaid
+flowchart LR
+    A[输入 base-url + API Key] --> B[自动获取模型列表<br/>挑选最强模型]
+    B --> C[身份与真实性]
+    B --> D[安全审计]
+    B --> E[质量检测]
+    B --> F[性能评估]
+    C --> G[20+ 项检测 · 6 大类别]
+    D --> G
+    E --> G
+    F --> G
+    G --> H{风险判定}
+    H --> I[彩色终端报告]
+    H --> J[HTML 可视化报告<br/>风险等级 · 评分 · 通过率]
+    H --> K[JSON 结构化输出]
+    I --> L[历史报告浏览<br/>--serve 本地 Web 服务]
+    J --> L
+```
 
 ## 功能特性
 
