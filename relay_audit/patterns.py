@@ -149,7 +149,7 @@ PROVIDER_HINTS: dict[str, list[str]] = {
 # 拒绝措辞必须足够明确，避免把"抱歉/作为AI助手"等日常用语误判为拒答
 REFUSAL_PATTERNS = re.compile(
     r"can('t|not)\s|cannot\s|cannot fulfill|I won't|I will not|"
-    r"I'?m\s+(not\s+able|unable)|i'?m\s+just\s+an\s+ai|I\s+am\s+not\s+able|DENIED|"
+    r"I'?m?\s+(not\s+able|unable)|i'?m\s+just\s+an\s+ai|I\s+am\s+not\s+able|DENIED|"
     r"不能|无法|不提供|拒绝|"
     r"抱歉[,，]?\s*(我)?(不能|无法|拒绝)|sorry[,，]?\s*(i\s+)?(can'?t|cannot)",
     re.IGNORECASE,
