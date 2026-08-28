@@ -51,6 +51,7 @@ def persist_result(result: Any, base_url: str) -> str:
     data = {
         "timestamp": ts,
         "base_url": redact(base_url),
+        "probe_suite": result.probe_suite,
         "summary": {
             "risk_level": result.risk_level,
             "high_count": result.high_count,
@@ -72,6 +73,7 @@ def persist_result(result: Any, base_url: str) -> str:
                 "name": r.name,
                 "ok": r.ok,
                 "latency_ms": r.latency_ms,
+                "ttft_ms": r.ttft_ms or None,
                 "status": r.status,
                 "content_preview": redact(r.content or "")[:200],
             }

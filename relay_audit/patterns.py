@@ -1,4 +1,4 @@
-"""检测模式 & 常量定义 — 对标 relay-audit 的 identity_patterns"""
+"""检测模式 & 常量 — 脱敏、危险内容、模型指纹、拒绝与代理特征"""
 
 from __future__ import annotations
 

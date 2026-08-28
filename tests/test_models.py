@@ -105,7 +105,7 @@ def test_scan_result_version_default() -> None:
 def test_scan_result_to_dict() -> None:
     cfg = ScanConfig(base_url="https://api.example.com", model="gpt-4o")
     results = [
-        _result(latency_ms=1000),
+        _result(latency_ms=1000, streaming=True, ttft_ms=120),
         _result(
             name="失败的",
             ok=False,
@@ -120,11 +120,18 @@ def test_scan_result_to_dict() -> None:
         )
     ]
     r = ScanResult(
-        cfg, findings, results, [ModelInfo(id="gpt-4o")], "2026-01-01T00:00:00+00:00", 12.5
+        cfg,
+        findings,
+        results,
+        [ModelInfo(id="gpt-4o")],
+        "2026-01-01T00:00:00+00:00",
+        12.5,
+        probe_suite="2026.08-test",
     )
     d = r.to_dict()
 
     assert d["version"] == __version__
+    assert d["probe_suite"] == "2026.08-test"
     assert d["base_url"] == "https://api.example.com"
     assert d["model"] == "gpt-4o"
     assert d["duration_s"] == 12.5
@@ -148,15 +155,17 @@ def test_scan_result_to_dict() -> None:
     assert t["ok"] is True
     assert t["status"] == 200
     assert t["latency_ms"] == 1000
+    assert t["ttft_ms"] == 120  # 流式结果携带首字延迟
     assert t["model_req"] == "gpt-4o"
     assert t["model_ret"] == "gpt-4o"
     assert t["tokens_per_second"] == 10.0
-    assert t["streaming"] is False
+    assert t["streaming"] is True
     assert t["turn_count"] == 1
     assert t["error"] is None
 
     # 失败测试携带脱敏后的 error
     t2 = d["tests"][1]
     assert t2["ok"] is False
+    assert t2["ttft_ms"] is None  # 非流式无 TTFT
     assert "sk-abcdefghijklmnop123456" not in t2["error"]
     assert "[REDACTED]" in t2["error"]

@@ -5,6 +5,7 @@ import json
 
 import httpx
 
+from relay_audit import client as client_module
 from relay_audit.client import ApiClient, _parse_chat_response
 
 
@@ -185,6 +186,29 @@ def test_chat_500_exhausts_retries() -> None:
     assert calls == 3  # 初始 + 2 次重试
 
 
+def test_chat_retry_exponential_backoff(monkeypatch) -> None:
+    """5xx 重试使用指数退避（0.5s → 1s），且第 3 次成功后不再等待。"""
+    delays: list[float] = []
+
+    async def fake_sleep(seconds: float) -> None:
+        delays.append(seconds)
+
+    monkeypatch.setattr(client_module.asyncio, "sleep", fake_sleep)
+    calls = 0
+
+    def handler(request):
+        nonlocal calls
+        calls += 1
+        if calls <= 2:
+            return httpx.Response(503, json={"error": "unavailable"})
+        return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+    r = _run(_mk_client(handler).chat("m", [{"role": "user", "content": "hi"}]))
+    assert r.ok and r.content == "ok"
+    assert calls == 3
+    assert delays == [0.5, 1.0]
+
+
 def test_chat_429_no_retry() -> None:
     calls = 0
 
@@ -272,6 +296,28 @@ def test_chat_stream_success() -> None:
     assert r.raw_id == "1"
     assert r.created == 1700000000
     assert r.usage == {"total_tokens": 5}
+
+
+def test_chat_stream_ttft() -> None:
+    """首 token 延迟被记录，且不大于总延迟；非流式路径保持 0。"""
+
+    async def handler(request):
+        await asyncio.sleep(0.05)  # 首包前延迟，确保 TTFT 可测量
+        body = (
+            b'data: {"choices":[{"delta":{"content":"He"}}]}\n\n'
+            b'data: {"choices":[{"delta":{"content":"y"}}]}\n\n'
+            b"data: [DONE]\n\n"
+        )
+        return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
+
+    r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
+    assert r.ok and r.content == "Hey"
+    assert r.ttft_ms > 0
+    assert r.ttft_ms <= r.latency_ms
+
+    # 非流式路径 TTFT 恒为 0
+    r2 = _run(_mk_client(lambda req: httpx.Response(200, json={})).chat("m", []))
+    assert r2.ttft_ms == 0
 
 
 def test_chat_stream_skips_bad_json() -> None:

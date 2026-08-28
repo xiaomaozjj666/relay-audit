@@ -901,6 +901,45 @@ def test_main_config_cli_overrides(monkeypatch, tmp_path) -> None:
     assert captured["config"].model == "cli-model"
 
 
+def test_main_config_merge_explicit_zero(monkeypatch, tmp_path) -> None:
+    """显式传入 --samples 0 不应被配置文件覆盖（回归：0 == False 曾被误判为未设置）。"""
+    cfg = tmp_path / "c.json"
+    cfg.write_text(
+        json.dumps({"base_url": "https://cfg.example.com", "samples": 3}), encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_execute(c):
+        captured["config"] = c
+        return 0, "", None
+
+    monkeypatch.setattr(cli, "execute_scan", fake_execute)
+    cli.main(["--config", str(cfg), "--samples", "0"])
+    assert captured["config"].samples == 0
+    assert captured["config"].base_url == "https://cfg.example.com"
+
+    captured.clear()
+    cli.main(["--config", str(cfg)])
+    assert captured["config"].samples == 3  # 未显式提供时配置文件生效
+
+
+def test_main_config_merge_explicit_flags(monkeypatch, tmp_path) -> None:
+    """CLI 显式提供的开关（--quick/--json）优先于配置文件，未提供的由配置文件补充。"""
+    cfg = tmp_path / "c.json"
+    cfg.write_text(json.dumps({"quick": True, "stream": True, "json": True}), encoding="utf-8")
+    captured = {}
+
+    def fake_execute(c):
+        captured["config"] = c
+        return 0, "", None
+
+    monkeypatch.setattr(cli, "execute_scan", fake_execute)
+    cli.main(["--config", str(cfg), "--base-url", "https://x", "--quick"])
+    assert captured["config"].quick is True  # CLI 显式提供
+    assert captured["config"].stream is True  # 仅配置文件提供
+    assert captured["config"].json_output is True
+
+
 def test_main_key_and_save_key(monkeypatch) -> None:
     saved = {}
 

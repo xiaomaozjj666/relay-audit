@@ -1,4 +1,4 @@
-"""数据类型定义 — 对标 relay-audit 的数据模型层"""
+"""数据模型 — Severity / Finding / ChatResult / ScanConfig / ScanResult"""
 
 from __future__ import annotations
 
@@ -53,6 +53,7 @@ class ChatResult:
     error: str = ""
     streaming: bool = False
     turn_count: int = 1
+    ttft_ms: int = 0  # 首 token 延迟（仅流式测试）
 
     @property
     def tokens_per_second(self) -> float:
@@ -104,6 +105,7 @@ class ScanResult:
     started_at: str
     duration_s: float
     version: str = __version__
+    probe_suite: str = ""  # 探针套件版本，便于跨版本对比与复现
 
     @property
     def high_count(self) -> int:
@@ -128,6 +130,7 @@ class ScanResult:
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
+            "probe_suite": self.probe_suite,
             "base_url": self.config.base_url,
             "model": self.config.model,
             "started_at": self.started_at,
@@ -157,6 +160,7 @@ class ScanResult:
                     "ok": r.ok,
                     "status": r.status,
                     "latency_ms": r.latency_ms,
+                    "ttft_ms": r.ttft_ms or None,
                     "model_req": r.model_req,
                     "model_ret": r.model_ret or None,
                     "tokens_per_second": round(r.tokens_per_second, 1),

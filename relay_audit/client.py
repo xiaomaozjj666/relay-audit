@@ -64,7 +64,7 @@ class ApiClient:
 
     特性：
     - httpx.AsyncClient 连接池
-    - 5xx 固定间隔重试（0.5s，最多 2 次；429/超时不重试）
+    - 5xx 指数退避重试（0.5s/1s，最多 2 次；429/超时不重试）
     - 流式 SSE 解析
     - 连接池预热
     """
@@ -143,7 +143,8 @@ class ApiClient:
                 lat = time.perf_counter() - t0
                 # 只对服务端错误重试，429/4xx 不重试（安全测试被拒是正常结果）
                 if r.status_code in (500, 502, 503, 504) and attempt < max_retries:
-                    await asyncio.sleep(0.5)
+                    # 指数退避：0.5s、1s
+                    await asyncio.sleep(0.5 * (2**attempt))
                     continue
                 return _parse_chat_response(model, r.status_code, r, lat)
             except (asyncio.TimeoutError, httpx.TimeoutException):
@@ -209,6 +210,7 @@ class ApiClient:
         created = 0
         usage = {}
         status = 0
+        first_tok_ms = 0
         try:
             async with self._client.stream(
                 "POST", "/v1/chat/completions", content=data, timeout=timeout
@@ -234,7 +236,10 @@ class ApiClient:
                     for c in obj.get("choices") or []:
                         if isinstance(c, dict):
                             d = c.get("delta", {}) or {}
-                            full_content += d.get("content", "") or ""
+                            delta = d.get("content", "") or ""
+                            if delta and not first_tok_ms:
+                                first_tok_ms = int((time.perf_counter() - t0) * 1000)
+                            full_content += delta
                     if obj.get("usage") and isinstance(obj["usage"], dict):
                         usage = obj["usage"]
         except asyncio.TimeoutError:
@@ -281,6 +286,7 @@ class ApiClient:
             created,
             "",
             streaming=True,
+            ttft_ms=first_tok_ms,
         )
 
     async def list_models(self) -> tuple[int, list[dict], dict, float, dict[str, str]]:

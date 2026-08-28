@@ -218,6 +218,23 @@ def test_print_rich(capsys) -> None:
     assert "通过 2/3" in out
 
 
+def test_print_rich_streaming_ttft_and_probe(capsys) -> None:
+    """流式结果的 TTFT 与探针套件版本在终端报告中展示。"""
+    r = _scan(
+        results=[_r(name="流式响应", streaming=True, ttft_ms=180)],
+    )
+    r.probe_suite = "2026.08.1"
+    reporter._print_rich(r)
+    out = capsys.readouterr().out
+    assert "首字 180ms" in out
+    assert "探针 2026.08.1" in out
+
+    # 无探针版本时不输出该段
+    reporter._print_rich(_scan())
+    out2 = capsys.readouterr().out
+    assert "探针" not in out2
+
+
 def test_print_terminal_rich(capsys) -> None:
     reporter.print_terminal(_scan(findings=[Finding(Severity.INFO, "info", "d")]))
     out = capsys.readouterr().out

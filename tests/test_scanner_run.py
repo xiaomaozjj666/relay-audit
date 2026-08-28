@@ -172,6 +172,12 @@ def test_run_scan_full(fake) -> None:
     assert ranks == sorted(ranks, reverse=True)
 
 
+def test_run_scan_probe_suite_version(fake) -> None:
+    """扫描结果携带探针套件版本，报告可复现、可跨版本对比。"""
+    result = _scan(_cfg())
+    assert result.probe_suite == scanner.PROBE_SUITE_VERSION
+
+
 def test_run_scan_prefetched_ids(fake) -> None:
     result = _scan(_cfg(model_ids=["gpt-4o", "gpt-9-x"]))
     assert fake.list_models_calls == 0

@@ -425,6 +425,8 @@ def interactive() -> int:
                 print(f"  [OK] {model}: 未发现高危问题")
 
         try:
+            from .scanner import PROBE_SUITE_VERSION
+
             final_config = ScanConfig(base_url=url, model=", ".join(models_to_test))
             model_infos = [ModelInfo(id=m) for m in ids]
             final_result = ScanResult(
@@ -434,6 +436,7 @@ def interactive() -> int:
                 models=model_infos,
                 started_at=dt.datetime.now(dt.timezone.utc).isoformat(),
                 duration_s=total_duration,
+                probe_suite=PROBE_SUITE_VERSION,
             )
             report_path = save_report(final_result)
             print(f"  报告: {report_path}")
@@ -574,28 +577,26 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.config:
         cfg = load_config(args.config)
-        config_defaults: list[tuple[str, Any]] = [
-            ("base_url", None),
-            ("model", ""),
-            ("timeout", 60),
-            ("samples", 2),
-            ("compare", []),
-            ("quick", False),
-            ("stream", False),
-            ("json", False),
-            ("output", None),
-            ("no_html", False),
-            ("skip_safety", False),
-            ("api_key_env", "RELAY_API_KEY"),
+        # 仅当某参数未被 CLI 显式提供（当前值仍等于 argparse 默认值）时，
+        # 才允许配置文件覆盖。不能用"值是否为 falsy"判断——
+        # 显式传入的 --samples 0 会因 0 == False 被误判为未设置而遭覆盖。
+        arg_defaults = {a.dest: a.default for a in ap._actions}
+        config_keys = [
+            "base_url",
+            "model",
+            "timeout",
+            "samples",
+            "compare",
+            "quick",
+            "stream",
+            "json",
+            "output",
+            "no_html",
+            "skip_safety",
+            "api_key_env",
         ]
-        for key, default in config_defaults:
-            if key in cfg and getattr(args, key, None) in (
-                None,
-                "",
-                [],
-                False,
-                default,
-            ):
+        for key in config_keys:
+            if key in cfg and getattr(args, key, None) == arg_defaults.get(key):
                 setattr(args, key, cfg[key])
 
     if not args.base_url:

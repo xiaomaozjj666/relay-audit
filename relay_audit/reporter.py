@@ -1,4 +1,4 @@
-"""报告生成 — HTML / 终端 / JSON，对标 relay-audit 的 reporter.py"""
+"""报告生成 — 终端 / HTML / JSON 三种输出"""
 
 from __future__ import annotations
 
@@ -193,7 +193,7 @@ def _print_rich(result: ScanResult) -> None:
     rt = Table(box=box.SIMPLE, title="测试明细", title_style="bold")
     rt.add_column("项目", min_width=14)
     rt.add_column("结果", width=6, justify="center")
-    rt.add_column("延迟", width=8, justify="right")
+    rt.add_column("延迟", width=12, justify="right")
     rt.add_column("tok/s", width=7, justify="right")
     rt.add_column("请求模型", max_width=20)
     rt.add_column("返回模型", max_width=20)
@@ -209,6 +209,8 @@ def _print_rich(result: ScanResult) -> None:
         tps_s = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
         lat_color = "red" if r.latency_ms > 3000 else "yellow" if r.latency_ms > 1000 else ""
         lat_s = f"[{lat_color}]{r.latency_ms}ms[/]" if lat_color else f"{r.latency_ms}ms"
+        if r.streaming and r.ttft_ms:
+            lat_s += f"\n首字 {r.ttft_ms}ms"
         st = " [dim][流][/]" if r.streaming else ""
         rt.add_row(
             f"{r.name}{st}",
@@ -219,9 +221,10 @@ def _print_rich(result: ScanResult) -> None:
             f"[dim]{r.model_ret or '-'}[/]",
         )
     console.print(rt)
+    probe_s = f"  |  探针 {result.probe_suite}" if result.probe_suite else ""
     console.print(
         f"  [dim]延迟 avg={avg:.0f}ms max={mx}ms  |  {avg_tps:.1f} tok/s  |  "
-        f"通过 {effective_ok}/{total}[/]"
+        f"通过 {effective_ok}/{total}{probe_s}[/]"
     )
     console.print()
 
@@ -416,11 +419,12 @@ def generate_html(result: ScanResult) -> str:
             )
         tps = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
         model_ret = esc(r.model_ret) if r.model_ret else "-"
+        ttft = f'<span class="ttft">首字 {r.ttft_ms}ms</span>' if r.streaming and r.ttft_ms else ""
         return (
             f'<tr class="t-{row_cls}">'
             f'<td><span class="test-name">{esc(r.name)}</span>{st}</td>'
             f'<td><span class="s-{s_cls}">{s_tag}</span></td>'
-            f'<td class="n">{r.latency_ms}ms{bar}</td>'
+            f'<td class="n">{r.latency_ms}ms{ttft}{bar}</td>'
             f'<td class="n">{tps}</td>'
             f'<td class="rp">{preview}{err_detail}</td>'
             f'<td class="n model-col">{model_ret}</td>'
@@ -433,6 +437,7 @@ def generate_html(result: ScanResult) -> str:
     ok_count = len(ok_tests)
 
     sd = result.started_at[:19].replace("T", " ") if result.started_at else "-"
+    probe_html = f" · 探针套件 {esc(result.probe_suite)}" if result.probe_suite else ""
 
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
@@ -692,6 +697,7 @@ details[open] summary::before {{ transform: rotate(90deg) }}
   font-size: 11px;
 }}
 .r {{ font-size: 10px; color: var(--muted); display: block; margin-top: 1px }}
+.ttft {{ font-size: 9px; color: var(--muted); display: block }}
 .no-issues {{ text-align:center; color:var(--green); padding:20px; font-weight:600; font-size:13px }}
 .footer {{
   text-align: center;
@@ -759,7 +765,7 @@ details[open] summary::before {{ transform: rotate(90deg) }}
   {f'<details><summary>通过测试 ({ok_count})</summary><table class="tb" style="margin-top:8px"><thead><tr><th>项目</th><th style="width:42px">结果</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>响应预览</th><th style="width:100px">返回模型</th></tr></thead><tbody>{rrows_ok}</tbody></table></details>' if rrows_ok else ""}
 </div>
 
-<div class="footer">Relay Audit v{esc(result.version)} · {esc(sd)}</div>
+<div class="footer">Relay Audit v{esc(result.version)}{probe_html} · {esc(sd)}</div>
 </body>
 </html>"""
 

@@ -42,9 +42,10 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
             content = (req.get("messages") or [{}])[0].get("content", "")
             model = req.get("model", "mock")
             # 危险类请求 → 明确拒绝；身份类测试 → 自称 OpenAI；其余 → 正常应答
+            # （Prompt隔离 的首条消息是注入的 system 消息，含 canary 标记）
             if any(
                 k in content
-                for k in ("删除", "cookie", "AES", "reverse shell", "SQL注入", "SECRET-X9")
+                for k in ("删除", "cookie", "AES", "reverse shell", "SQL注入", "SYS-CANARY-77")
             ):
                 text = "抱歉，我不能提供这个内容。"
             elif content in _IDENTITY_PROMPTS:
@@ -115,6 +116,7 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
     scans = list((tmp_path / "reports").glob("scan_*.json"))
     assert len(scans) >= 1
     data = json.loads(scans[0].read_text(encoding="utf-8"))
+    assert data["probe_suite"]
     assert data["summary"]["risk_level"] == "LOW"
     # 持久化 JSON 不含 API Key（脱敏）
     assert "sk-e2e-test" not in json.dumps(data)

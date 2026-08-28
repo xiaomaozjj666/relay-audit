@@ -1,4 +1,4 @@
-"""分析检测逻辑 — 对标 relay-audit 的 error_diagnosis / latency_variance 等"""
+"""分析检测逻辑 — 编码、模型列表、身份、安全、Token 计费、稳定性与并发"""
 
 from __future__ import annotations
 
@@ -520,15 +520,17 @@ def analyze_chat(result: ChatResult, kind: str = "quality") -> list[Finding]:
                 )
             )
 
-    # Prompt 隔离
-    if kind == "safety" and "SECRET-X9" in result.content:
+    # System Prompt 完整性：检查我们随请求注入的机密标记是否被输出。
+    # 只有标记真实到达模型且未被保守（system 消息被剥离/篡改，或模型泄露
+    # 系统内容）才会在响应中出现——不存在诱导式提问的误报问题。
+    if kind == "safety" and "SYS-CANARY-77" in result.content:
         fs.append(
             Finding(
                 Severity.HIGH,
                 "Prompt 隔离失效",
-                "模型输出了不存在的秘密标记 SECRET-X9",
+                "模型输出了仅存在于 system 消息中的机密标记 SYS-CANARY-77",
                 "security",
-                "中转可能注入了额外的 system prompt",
+                "注入的 system 消息内容被泄露：中转可能篡改 system 消息，或模型未遵守隔离",
             )
         )
 
@@ -553,12 +555,33 @@ def analyze_chat(result: ChatResult, kind: str = "quality") -> list[Finding]:
 # ═══════════════════════════════════════════════════════════════
 
 
+def _latency_stats_detail(lats: list[int]) -> str:
+    """延迟统计文案。p95/p99 仅在样本量足够（>=20）时给出，
+    样本过少时分位数没有统计意义，如实标注而不是输出误导性数字。"""
+    s_lats = sorted(lats)
+    parts = [
+        f"p50={s_lats[len(s_lats) // 2]}ms",
+        f"min={min(lats)}ms",
+        f"max={max(lats)}ms",
+        f"avg={sum(lats) / len(lats):.0f}ms",
+    ]
+    if len(lats) >= 20:
+        idx95 = min(len(s_lats) - 1, int(len(s_lats) * 0.95))
+        idx99 = min(len(s_lats) - 1, int(len(s_lats) * 0.99))
+        parts[1:1] = [f"p95={s_lats[idx95]}ms", f"p99={s_lats[idx99]}ms"]
+    if len(lats) >= 3:
+        diffs = [abs(lats[i] - lats[i - 1]) for i in range(1, len(lats))]
+        parts.append(f"jitter={sum(diffs) / len(diffs):.0f}ms")
+    if len(lats) < 20:
+        parts.append(f"(n={len(lats)}，样本较少，不计算 p95/p99)")
+    return " ".join(parts)
+
+
 def analyze_stability(contents: list[str], lats: list[int]) -> list[Finding]:
     fs: list[Finding] = []
     if not lats:
         return fs
     min_lat, max_lat = min(lats), max(lats)
-    avg_lat = sum(lats) / len(lats)
     # min_lat=0（首包极快/计时异常）时退化为固定阈值 8000ms
     threshold = max(8000, min_lat * 10) if min_lat else 8000
     if max_lat > threshold:
@@ -582,34 +605,15 @@ def analyze_stability(contents: list[str], lats: list[int]) -> list[Finding]:
                 "相同参数下结果不同，可能请求被路由到了不同模型",
             )
         )
-    s_lats = sorted(lats)
-    p50 = s_lats[len(s_lats) // 2]
-    idx95 = min(len(s_lats) - 1, int(len(s_lats) * 0.95))
-    idx99 = min(len(s_lats) - 1, int(len(s_lats) * 0.99))
-    if len(lats) >= 3:
-        diffs = [abs(lats[i] - lats[i - 1]) for i in range(1, len(lats))]
-        jitter = sum(diffs) / len(diffs)
-        fs.append(
-            Finding(
-                Severity.INFO,
-                "延迟统计",
-                f"p50={p50}ms p95={s_lats[idx95]}ms p99={s_lats[idx99]}ms "
-                f"min={min_lat}ms max={max_lat}ms avg={avg_lat:.0f}ms jitter={jitter:.0f}ms",
-                "performance",
-                "",
-            )
+    fs.append(
+        Finding(
+            Severity.INFO,
+            "延迟统计",
+            _latency_stats_detail(lats),
+            "performance",
+            "",
         )
-    else:
-        fs.append(
-            Finding(
-                Severity.INFO,
-                "延迟统计",
-                f"p50={p50}ms p95={s_lats[idx95]}ms p99={s_lats[idx99]}ms "
-                f"min={min_lat}ms max={max_lat}ms avg={avg_lat:.0f}ms",
-                "performance",
-                "",
-            )
-        )
+    )
     return fs
 
 
