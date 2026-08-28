@@ -1,0 +1,44 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Install build tool
+        run: python -m pip install build
+      - name: Build sdist and wheel
+        run: python -m build
+      - name: Check metadata
+        run: |
+          python -m pip install twine
+          twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  publish:
+    # 发布到 PyPI 需要一次性配置 Trusted Publisher：
+    # https://docs.pypi.org/trusted-publishers/
+    needs: build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # OIDC trusted publishing 必需
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

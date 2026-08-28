@@ -45,11 +45,11 @@ flowchart LR
 
 - **一条命令检测** — 仅需 `--base-url` 和 API Key；未指定模型时自动获取模型列表并挑选最强模型，交互模式（零参数启动）可自动并发检测 3 个最强模型
 - **身份与真实性** — 模型偷换检测、身份识别探针、知识截止日期验证、模型综合指纹、模型列表一致性、可疑/非标准模型名识别
-- **安全审计** — Prompt 隔离（canary 注入）、危险内容拒答检测（破坏性删除、Cookie 窃取、勒索软件、反向 Shell、SQL 注入），结合危险内容模式与拒答模式双重判定
+- **安全审计** — System Prompt 完整性（随请求注入 canary 标记，检测系统消息被篡改或内容泄露）、危险内容拒答检测（破坏性删除、Cookie 窃取、勒索软件、反向 Shell、SQL 注入），结合危险内容模式与拒答模式双重判定
 - **质量检测** — 基础对话、指令遵循、多轮对话、长上下文、编码一致性、乱码检测、Token 计费校验；JSON 模式与 Function Calling 失败时自动降级为纯文本重试
-- **性能评估** — 延迟统计（p50 / p95 / p99 / 抖动）、稳定性采样、并发突发测试、流式响应（SSE）测试
+- **性能评估** — 延迟统计（p50 / 抖动；样本充足时含 p95 / p99）、稳定性采样、并发突发测试、流式响应（SSE）测试与首字延迟（TTFT）测量
 - **模型对比** — `--compare` 并排对比多个模型的真实身份与响应
-- **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到报告目录（Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`，可用环境变量 `RELAY_AUDIT_REPORTS_DIR` 覆盖；默认自动清理 7 天前的旧报告，`RELAY_AUDIT_REPORT_TTL_DAYS=0` 可关闭）
+- **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到报告目录（Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`，可用环境变量 `RELAY_AUDIT_REPORTS_DIR` 覆盖；默认自动清理 7 天前的旧报告，`RELAY_AUDIT_REPORT_TTL_DAYS=0` 可关闭）。报告携带探针套件版本号，不同时间的扫描结果可复现、可对比
 - **历史报告浏览** — 内置本地 Web 服务器，在浏览器中浏览往期 HTML / JSON 扫描报告
 - **隐私与安全** — 报告与日志中 API Key 自动脱敏；`--save-key` 以受限权限（Linux/macOS `0o600`，Windows 经 `icacls`）保存在本地
 
@@ -198,12 +198,14 @@ relay-audit --serve 8080
 
 | 类别 | 检测内容 |
 |------|----------|
-| 安全 | Prompt 隔离（canary 注入）、危险内容拒答（破坏性删除 / Cookie 窃取 / 勒索软件 / 反向 Shell / SQL 注入） |
+| 安全 | System Prompt 完整性（canary 注入）、危险内容拒答（破坏性删除 / Cookie 窃取 / 勒索软件 / 反向 Shell / SQL 注入） |
 | 身份 | 模型身份识别、模型偷换检测、知识截止日期验证、模型指纹、模型列表一致性 |
 | 质量 | 基础对话、指令遵循、编码一致性、JSON 模式、Function Calling、多轮对话、长上下文、Token 计费校验、乱码检测 |
-| 性能 | 延迟统计（p50 / p95 / p99 / 抖动）、并发突发测试、稳定性采样 |
+| 性能 | 延迟统计（p50 / 抖动；样本 ≥20 时含 p95 / p99）、并发突发测试、稳定性采样、流式首字延迟（TTFT） |
 | 模型 | 可疑模型名检测、多供应商聚合识别、大小写重复检测 |
 | 通用 | 代理 / CDN 特征检测、响应头分析、错误模式识别 |
+
+> 探针提示与判定规则统称为「探针套件」，以 `relay_audit.scanner.PROBE_SUITE_VERSION` 标识版本并写入每份报告；修改探针时需递增该版本号。
 
 ## 项目结构
 
@@ -242,3 +244,9 @@ mypy relay_audit
 ## 许可证
 
 [MIT License](LICENSE)
+
+## 文档
+
+- [English Documentation](README.en.md)
+- [更新日志](CHANGELOG.md)
+- [参与贡献](CONTRIBUTING.md)
