@@ -1,16 +1,23 @@
 """Tests for relay_audit package entry points and REPORTS_DIR resolution."""
 
 import runpy
+from pathlib import Path
 
 import pytest
+import tomllib
 
 import relay_audit
 from relay_audit import _default_reports_dir
+from relay_audit._version import __version__
 
 
 def test_version_exported() -> None:
+    """包导出版本且与 pyproject 声明一致（版本号只允许在 _version.py 改一处）。"""
     assert isinstance(relay_audit.__version__, str)
-    assert relay_audit.__version__ == "2.2.0"
+    assert relay_audit.__version__ == __version__
+    pyproject = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        assert tomllib.load(f)["project"]["version"] == __version__
     assert "__version__" in relay_audit.__all__
 
 
