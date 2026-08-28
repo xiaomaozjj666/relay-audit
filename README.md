@@ -207,6 +207,32 @@ relay-audit --serve 8080
 
 > 探针提示与判定规则统称为「探针套件」，以 `relay_audit.scanner.PROBE_SUITE_VERSION` 标识版本并写入每份报告；修改探针时需递增该版本号。
 
+## 检测有效性校准
+
+检测结论的可信度需要用已知底细的目标来验证。内置校准工具：对一组已知真实情况（是否应触发高危）的中转站批量扫描，输出混淆矩阵与精确率/召回率，把严重等级从经验值校准为实证值。
+
+1. 准备目标清单 `targets.json`：
+
+```json
+[
+  {"name": "直连官方", "base_url": "https://api.example.com",
+   "api_key": "sk-...", "label": "no_high", "note": "官方 API，不应有高危"},
+  {"name": "偷换站A", "base_url": "https://relay.example.com",
+   "api_key": "sk-...", "label": "high", "model": "gpt-4o",
+   "note": "已知 gpt-4o 被换成小模型"}
+]
+```
+
+2. 运行（报告默认写入 `<报告目录>/calibration/`）：
+
+```bash
+relay-audit-calibrate targets.json            # 或 python -m relay_audit.calibrate targets.json
+```
+
+3. 查看 `calibration_*.md`（混淆矩阵、精确率/召回率、每目标明细）与每目标原始 JSON。
+
+退出码：`0` 判定全部与真实情况一致；`1` 存在误报/漏报；`2` 有目标扫描失败或清单无效。
+
 ## 项目结构
 
 ```
@@ -219,6 +245,7 @@ relay_audit/
 ├── analysis.py       # 分析检测逻辑（错误诊断、稳定性、并发等）
 ├── client.py         # OpenAI API 异步客户端
 ├── scanner.py        # 测试编排与执行
+├── calibrate.py      # 检测有效性校准（混淆矩阵 / 精确率 / 召回率）
 ├── reporter.py       # 报告生成（HTML / 终端 / JSON）
 └── serve.py          # 报告浏览 Web 服务器
 ```

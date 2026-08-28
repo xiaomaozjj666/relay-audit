@@ -31,6 +31,7 @@ Issues = "https://github.com/xiaomaozjj666/relay-audit/issues"
 
 [project.scripts]
 relay-audit = "relay_audit.cli:main"
+relay-audit-calibrate = "relay_audit.calibrate:main"
 
 [tool.ruff]
 line-length = 100

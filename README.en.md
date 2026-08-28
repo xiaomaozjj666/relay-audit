@@ -45,6 +45,16 @@ Run `relay-audit` with no arguments for an interactive mode: it masks key input,
 - Scan results persist to a local reports dir; `relay-audit --serve` starts a small web UI to browse past reports
 - Every report carries the probe-suite version, so results stay comparable over time
 
+### Validity calibration
+
+Trustworthy verdicts need validation against known ground truth. The bundled calibration tool scans a list of relays whose real status you already know and reports a confusion matrix with precision/recall:
+
+```bash
+relay-audit-calibrate targets.json   # or python -m relay_audit.calibrate targets.json
+```
+
+See the Chinese README ("检测有效性校准") for the target-list format.
+
 Keys are redacted in all reports and logs. `--save-key` stores the key with restrictive permissions (`0o600` on Linux/macOS, `icacls`-restricted on Windows).
 
 ## Exit codes

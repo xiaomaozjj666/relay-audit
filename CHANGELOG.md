@@ -32,6 +32,9 @@
 - **client/models/reporter**: 流式响应测试增加首字延迟（TTFT）测量，
   在终端与 HTML 报告中展示，并写入 JSON 输出。
 - **client**: 5xx 重试实现真正的指数退避（0.5s → 1s），与 README 描述一致。
+- **calibrate**: 检测有效性校准工具（`relay-audit-calibrate` / `python -m relay_audit.calibrate`）：
+  对已知底细的中转站批量扫描，输出混淆矩阵、精确率/召回率与每目标原始结果，
+  把严重等级从经验值校准为实证值。
 - **docs**: 英文版 README（`README.en.md`）、`CHANGELOG.md`、`CONTRIBUTING.md`，
   以及基于 tag 的发布工作流（构建 sdist/wheel 并发布 PyPI）。
 
