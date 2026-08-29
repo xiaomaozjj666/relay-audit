@@ -37,14 +37,16 @@ def test_cache_path_env_override(tmp_path) -> None:
 
 def test_cache_path_win32(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("RELAY_AUDIT_DATA_DIR", raising=False)
-    monkeypatch.setattr(susdata.os, "name", "nt")
+    # patch sys.platform 而非 os.name：后者会让 pathlib 在 POSIX 上
+    # 尝试实例化 WindowsPath 而抛 NotImplementedError
+    monkeypatch.setattr(susdata.sys, "platform", "win32")
     monkeypatch.setenv("LOCALAPPDATA", str(tmp_path))
     assert susdata.cache_path() == tmp_path / "relay-audit" / "sus_patterns.json"
 
 
 def test_cache_path_win32_no_localappdata(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("RELAY_AUDIT_DATA_DIR", raising=False)
-    monkeypatch.setattr(susdata.os, "name", "nt")
+    monkeypatch.setattr(susdata.sys, "platform", "win32")
     monkeypatch.delenv("LOCALAPPDATA", raising=False)
     monkeypatch.setattr(susdata.Path, "home", lambda: tmp_path)
     assert susdata.cache_path() == tmp_path / "relay-audit" / "sus_patterns.json"
@@ -52,7 +54,7 @@ def test_cache_path_win32_no_localappdata(monkeypatch, tmp_path) -> None:
 
 def test_cache_path_posix(monkeypatch, tmp_path) -> None:
     monkeypatch.delenv("RELAY_AUDIT_DATA_DIR", raising=False)
-    monkeypatch.setattr(susdata.os, "name", "posix")
+    monkeypatch.setattr(susdata.sys, "platform", "linux")
     monkeypatch.setattr(susdata.Path, "home", lambda: tmp_path)
     assert susdata.cache_path() == tmp_path / ".relay_audit" / "sus_patterns.json"
 

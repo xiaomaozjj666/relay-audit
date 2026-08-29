@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import sys
 from pathlib import Path
 
 MAX_PATTERNS = 64
@@ -26,7 +27,10 @@ def _data_dir() -> Path:
     env = os.environ.get("RELAY_AUDIT_DATA_DIR", "").strip()
     if env:
         return Path(env).expanduser().resolve()
-    if os.name == "nt":
+    # 与 __init__._default_reports_dir 一致用 sys.platform 判断；
+    # 不用 os.name——测试中 patch os.name 会让 pathlib 在 POSIX 上
+    # 尝试实例化 WindowsPath 而抛 NotImplementedError
+    if sys.platform == "win32":
         base = os.environ.get("LOCALAPPDATA") or str(Path.home())
         return Path(base) / "relay-audit"
     return Path.home() / ".relay_audit"
