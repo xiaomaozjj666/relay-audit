@@ -43,7 +43,10 @@ async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[s
 # 2026.08.2: 校准——GPT 可疑版本阈值升至 5.7（5.6 已发布）；
 #           拒绝+少量危险命中统一为中危（safe completion 不因篇幅升高危）；
 #           知识探针不再参与提供商自述比对。
-PROBE_SUITE_VERSION = "2026.08.2"
+# 2026.08.3: 校准——按 2026-08 真实版本更新可疑阈值：Claude Opus 5 已发布
+#           （放行 opus-5*），Gemini 3.x 已到 3.6（仅标 4+），Qwen 3.8-Max
+#           已发布（放行 3.8，标 3.9+/4+）。DeepSeek V4、GPT 5.6 维持原判。
+PROBE_SUITE_VERSION = "2026.08.3"
 
 PROMPTS = {
     "identity": '只输出JSON: {"model_self_id":"你觉得你是什么模型","provider":"你的提供商","canary":"RLY-42"}',

@@ -6,6 +6,20 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.2] - 2026-08-29
+
+### 修复（可疑模型名阈值对齐 2026-08 真实版本）
+
+依据公开发布信息核校各家族"不存在的版本"阈值（探针套件 2026.08.3）：
+
+- **Claude**: Opus 5 已发布——放行 `opus-5*`，可疑阈值升至 Opus 6+；
+  4.1–4.8 等真实历史版本一并放行。
+- **Gemini**: 3.x 已到 3.6 Flash（4 尚在预训练未发布）——不再误标 3.2–3.9，
+  仅标 `gemini-4` 及以上。
+- **Qwen**: 3.8-Max 已发布（官方命名 `qwen3.8-max` 无连字符，模式已兼容）——
+  放行 3.8，标 3.9+ 与 4+。
+- GPT（5.6 封顶，标 5.7+）与 DeepSeek（V4 已发布，标 V5+）经核对无误，维持原判。
+
 ## [2.3.1] - 2026-08-29
 
 ### 修复（首次真实目标校准）
@@ -87,7 +101,8 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...HEAD
+[2.3.2]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.0.0...v2.2.0

@@ -69,10 +69,42 @@ def test_danger_patterns() -> None:
 def test_sus_model_patterns() -> None:
     assert SUS_MODEL_PATTERNS[0][0].search("gpt-9.9-turbo")
     assert not SUS_MODEL_PATTERNS[0][0].search("gpt-4o")
-    assert SUS_MODEL_PATTERNS[1][0].search("claude-opus-5")
+    assert not SUS_MODEL_PATTERNS[1][0].search("claude-opus-5")  # Opus 5 已发布
     assert not SUS_MODEL_PATTERNS[1][0].search("claude-opus-4-6")
     assert SUS_MODEL_PATTERNS[4][0].search("deepseek-v5")
     assert SUS_MODEL_PATTERNS[5][0].search("free-router")
+
+
+def test_sus_model_patterns_2026_08_reality() -> None:
+    """阈值对齐 2026-08 真实版本（校准回归）。"""
+    # GPT：5.6 封顶，5.6 全系放行，5.7+/gpt-6 可疑
+    gpt = SUS_MODEL_PATTERNS[0][0]
+    for mid in ("gpt-5.2", "gpt-5.5", "gpt-5.6", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"):
+        assert not gpt.search(mid), mid
+    assert gpt.search("gpt-5.7") and gpt.search("gpt-6")
+
+    # Claude：Opus 5 已发布（4.8 为上一代 4.x 顶配）
+    claude = SUS_MODEL_PATTERNS[1][0]
+    for mid in ("claude-opus-5", "claude-opus-5-2", "claude-opus-4-8", "claude-opus-4-1"):
+        assert not claude.search(mid), mid
+    assert claude.search("claude-opus-6") and claude.search("claude-opus-4-9")
+
+    # Gemini：3.x 已到 3.6，4 尚未发布（预训练中）
+    gemini = SUS_MODEL_PATTERNS[2][0]
+    for mid in ("gemini-3.1-pro", "gemini-3.5-flash", "gemini-3.6-flash", "gemini-pro"):
+        assert not gemini.search(mid), mid
+    assert gemini.search("gemini-4") and gemini.search("gemini-5")
+
+    # Qwen：3.8-Max 已发布（官方命名为 qwen3.8-max，无连字符），3.9/4+ 可疑
+    qwen = SUS_MODEL_PATTERNS[3][0]
+    for mid in ("qwen3.8-max", "qwen-3.8-max", "qwen3.5-35b", "qwen-2.5"):
+        assert not qwen.search(mid), mid
+    assert qwen.search("qwen3.9") and qwen.search("qwen-4")
+
+    # DeepSeek：V4 已发布，V5+ 可疑
+    deepseek = SUS_MODEL_PATTERNS[4][0]
+    assert not deepseek.search("deepseek-v4") and not deepseek.search("DeepSeek-V4-Flash")
+    assert deepseek.search("deepseek-v5")
 
 
 def test_known_families_and_hints() -> None:

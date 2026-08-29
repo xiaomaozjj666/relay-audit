@@ -75,14 +75,17 @@ SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
         re.compile(r"gpt-5\.[7-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.IGNORECASE),
         "GPT 不存在版本 (最高 GPT-5.6)",
     ),
-    (re.compile(r"opus-(?!4-[5-8]\b)\d", re.IGNORECASE), "Claude 不存在版本 (最高 Opus 4.8)"),
     (
-        re.compile(r"gemini-3\.[2-9]|gemini-3\.\d{2,}|gemini-[4-9]", re.IGNORECASE),
-        "Gemini 不存在版本 (最高 3.1)",
+        re.compile(r"opus-(?!4-[1-8]\b)(?!5([-._]\d+)?\b)\d", re.IGNORECASE),
+        "Claude 不存在版本 (最高 Opus 5)",
     ),
     (
-        re.compile(r"qwen-3\.[89]|qwen-3\.\d{2,}|qwen-[4-9]", re.IGNORECASE),
-        "Qwen 不存在版本 (最高 3.7)",
+        re.compile(r"gemini-[4-9]", re.IGNORECASE),
+        "Gemini 不存在版本 (4 尚未发布，3.x 已到 3.6)",
+    ),
+    (
+        re.compile(r"qwen-?[4-9]|qwen-?3\.(9|\d{2,})", re.IGNORECASE),
+        "Qwen 不存在版本 (最高 3.8-Max)",
     ),
     (re.compile(r"deepseek-v[5-9]", re.IGNORECASE), "DeepSeek 不存在版本 (最高 V4)"),
     (re.compile(r"free|auto|router|pool|fallback", re.IGNORECASE), "路由/聚合类模型"),
