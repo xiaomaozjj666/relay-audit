@@ -15,7 +15,8 @@ from pathlib import Path
 MAX_PATTERNS = 64
 
 _DEFAULT_URL = (
-    "https://raw.githubusercontent.com/xiaomaozjj666/relay-audit/main/"
+    # 注意分支名是 master（仓库默认分支），不是 main
+    "https://raw.githubusercontent.com/xiaomaozjj666/relay-audit/master/"
     "relay_audit/data/sus_patterns.json"
 )
 

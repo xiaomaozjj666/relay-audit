@@ -6,6 +6,13 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.4] - 2026-08-29
+
+### 修复
+
+- **susdata**: `--refresh-sus` 默认地址误写 `main` 分支导致 404——
+  本仓库默认分支为 `master`。真实安装回归中发现，已修正并补默认地址断言。
+
 ## [2.3.3] - 2026-08-29
 
 ### 新增（可疑模型名规则集与代码分离）
@@ -115,7 +122,8 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.4...HEAD
+[2.3.4]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...v2.3.4
 [2.3.3]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...v2.3.3
 [2.3.2]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.0...v2.3.1

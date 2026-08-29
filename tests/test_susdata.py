@@ -61,7 +61,11 @@ def test_default_url_env_override(monkeypatch) -> None:
     monkeypatch.setenv("RELAY_AUDIT_SUS_URL", "https://example.com/rules.json")
     assert susdata.default_url() == "https://example.com/rules.json"
     monkeypatch.delenv("RELAY_AUDIT_SUS_URL")
-    assert susdata.default_url().startswith("https://raw.githubusercontent.com/")
+    default = susdata.default_url()
+    assert default.startswith("https://raw.githubusercontent.com/")
+    # 回归：默认地址必须指向真实默认分支 master（v2.3.3 曾误写 main 导致 404）
+    assert "/master/" in default
+    assert "/relay_audit/data/sus_patterns.json" in default
 
 
 def test_bundled_file_valid() -> None:
