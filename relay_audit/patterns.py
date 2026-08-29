@@ -72,8 +72,8 @@ DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(r"gpt-5\.[6-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.IGNORECASE),
-        "GPT 不存在版本 (最高 GPT-5.5)",
+        re.compile(r"gpt-5\.[7-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.IGNORECASE),
+        "GPT 不存在版本 (最高 GPT-5.6)",
     ),
     (re.compile(r"opus-(?!4-[5-8]\b)\d", re.IGNORECASE), "Claude 不存在版本 (最高 Opus 4.8)"),
     (

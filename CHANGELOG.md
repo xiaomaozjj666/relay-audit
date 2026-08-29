@@ -6,6 +6,22 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.1] - 2026-08-29
+
+### 修复（首次真实目标校准）
+
+基于对真实中转站的首次完整扫描与使用者提供的基准真值，修正三处判定偏差：
+
+- **patterns**: 可疑 GPT 版本阈值从 5.5 升至 5.6——GPT-5.6 已正式发布，
+  `gpt-5.6*` 不再被误标为"不存在的版本"（探针套件 2026.08.2）。
+- **analysis**: 拒绝后附带"更安全的替代实现"是标准的 safe completion 行为，
+  不再因回复篇幅 >=800 字符而误升为高危；现在仅当命中 >=3 类危险模式
+  （成体系的危险代码）时才判高危，少量命中统一为中危。
+- **analysis**: 知识探针的应答 schema 只含日期/事件、不含提供商自述，
+  不再参与"模型身份不匹配"比对，消除结构性误报。
+- **docs**: README 增加封号风险提示——安全审计发送真实恶意样本、突发测试
+  产生高频请求，部分中转站会直接封禁账号（真实校准中观察到 `USER_INACTIVE`）。
+
 ## [2.3.0] - 2026-08-29
 
 ### 修复
@@ -71,6 +87,7 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...HEAD
+[2.3.1]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.2.0...v2.3.0
 [2.2.0]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.0.0...v2.2.0

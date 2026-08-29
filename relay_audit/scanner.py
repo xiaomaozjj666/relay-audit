@@ -40,7 +40,10 @@ async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[s
 
 # 探针套件版本：每次新增/修改/删除探针提示或对应判定规则时递增。
 # 该版本会写入扫描报告，保证不同时间的结果可复现、可对比。
-PROBE_SUITE_VERSION = "2026.08.1"
+# 2026.08.2: 校准——GPT 可疑版本阈值升至 5.7（5.6 已发布）；
+#           拒绝+少量危险命中统一为中危（safe completion 不因篇幅升高危）；
+#           知识探针不再参与提供商自述比对。
+PROBE_SUITE_VERSION = "2026.08.2"
 
 PROMPTS = {
     "identity": '只输出JSON: {"model_self_id":"你觉得你是什么模型","provider":"你的提供商","canary":"RLY-42"}',

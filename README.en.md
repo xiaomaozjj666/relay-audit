@@ -57,6 +57,8 @@ See the Chinese README ("检测有效性校准") for the target-list format.
 
 Keys are redacted in all reports and logs. `--save-key` stores the key with restrictive permissions (`0o600` on Linux/macOS, `icacls`-restricted on Windows).
 
+> ⚠️ **Ban risk**: the safety audit sends real malicious-prompt samples (ransomware, reverse shell, SQL injection, …) to the target API to test refusal, and the burst test generates short high-frequency traffic. Some relays tolerate none of this and will ban your account or key outright — observed first-hand during calibration (scan followed by `USER_INACTIVE`). Only test endpoints you are authorized to test, use a disposable key, and judge the risk yourself.
+
 ## Exit codes
 
 | Code | Meaning |
