@@ -1,0 +1,34 @@
+{
+  "version": "2026.08.3",
+  "description": "可疑/非标准模型名规则集 — 各家族『不存在的版本』阈值随厂商发布节奏维护，经 --refresh-sus 在线更新",
+  "patterns": [
+    {
+      "pattern": "gpt-5\\.[7-9]|gpt-5\\.\\d{2,}|gpt-[6-9]",
+      "label": "GPT 不存在版本 (最高 GPT-5.6)"
+    },
+    {
+      "pattern": "opus-(?!4-[1-8]\\b)(?!5([-._]\\d+)?\\b)\\d",
+      "label": "Claude 不存在版本 (最高 Opus 5)"
+    },
+    {
+      "pattern": "gemini-[4-9]",
+      "label": "Gemini 不存在版本 (4 尚未发布，3.x 已到 3.6)"
+    },
+    {
+      "pattern": "qwen-?[4-9]|qwen-?3\\.(9|\\d{2,})",
+      "label": "Qwen 不存在版本 (最高 3.8-Max)"
+    },
+    {
+      "pattern": "deepseek-v[5-9]",
+      "label": "DeepSeek 不存在版本 (最高 V4)"
+    },
+    {
+      "pattern": "free|auto|router|pool|fallback",
+      "label": "路由/聚合类模型"
+    },
+    {
+      "pattern": "[?]",
+      "label": "模型名含问号"
+    }
+  ]
+}

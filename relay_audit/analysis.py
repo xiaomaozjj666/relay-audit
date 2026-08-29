@@ -6,6 +6,7 @@ import re
 import time
 from typing import Any
 
+from relay_audit import patterns
 from relay_audit.models import ChatResult, Finding, ModelInfo, Severity
 from relay_audit.patterns import (
     DANGER_PATTERNS,
@@ -87,7 +88,7 @@ def analyze_models(models: list[ModelInfo]) -> list[Finding]:
             Finding(
                 sev,
                 "可疑/非标准模型名",
-                f"发现 {len(sus)} 个: {', '.join(sus[:15])}",
+                f"发现 {len(sus)} 个: {', '.join(sus[:15])} (规则集 v{patterns.SUS_RULES_VERSION})",
                 "model",
                 "中转可能使用了自定义或伪造的模型名",
             )

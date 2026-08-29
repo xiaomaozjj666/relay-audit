@@ -1,5 +1,8 @@
 """Tests for relay_audit.patterns."""
 
+import pytest
+
+from relay_audit import susdata
 from relay_audit.patterns import (
     CAT_CN,
     DANGER_PATTERNS,
@@ -16,6 +19,19 @@ from relay_audit.patterns import (
     redact,
     short,
 )
+
+
+@pytest.fixture(autouse=True)
+def _pin_bundled_sus_rules(tmp_path, monkeypatch):
+    """规则集钉在包内置版本，索引断言不受开发机本地缓存影响。"""
+    monkeypatch.setenv("RELAY_AUDIT_DATA_DIR", str(tmp_path / "data"))
+    patterns_module = SUS_MODEL_PATTERNS  # 原地变更的同一列表对象
+    entries, version = susdata.load_bundled()
+    from relay_audit import patterns as _p
+
+    _p._set_sus(entries, version)
+    yield
+    assert patterns_module is _p.SUS_MODEL_PATTERNS
 
 
 def test_redact() -> None:

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from relay_audit import susdata
+
 # ═══════════════════════════════════════════════════════════════
 # 敏感信息脱敏
 # ═══════════════════════════════════════════════════════════════
@@ -67,10 +69,18 @@ DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 # ═══════════════════════════════════════════════════════════════
-# 可疑模型名模式
+# 可疑模型名模式 — 规则数据与代码分离
 # ═══════════════════════════════════════════════════════════════
 
-SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
+# SUS_MODEL_PATTERNS 由 susdata.init() 在导入时装配：
+# 本地缓存（--refresh-sus 写入）→ 包内置 data/sus_patterns.json → BUILTIN 兜底。
+# 厂商发新版后刷新规则集即可，无需升级工具。规则版本号 SUS_RULES_VERSION
+# 会写入检测发现的详情，保证报告可追溯。
+SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = []
+SUS_RULES_VERSION = "builtin"
+
+# 代码内兜底：仅当包内置 JSON 损坏（正常分发不会发生）时使用。
+BUILTIN_SUS_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
         re.compile(r"gpt-5\.[7-9]|gpt-5\.\d{2,}|gpt-[6-9]", re.IGNORECASE),
         "GPT 不存在版本 (最高 GPT-5.6)",
@@ -91,6 +101,22 @@ SUS_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"free|auto|router|pool|fallback", re.IGNORECASE), "路由/聚合类模型"),
     (re.compile(r"[?]"), "模型名含问号"),
 ]
+
+
+def _set_sus(entries: list[tuple[re.Pattern, str]], version: str) -> None:
+    """整体替换生效中的规则集（原地变更，保持既有引用有效）。"""
+    global SUS_RULES_VERSION
+    SUS_MODEL_PATTERNS.clear()
+    SUS_MODEL_PATTERNS.extend(entries)
+    SUS_RULES_VERSION = version
+
+
+def _use_builtin() -> None:
+    _set_sus(BUILTIN_SUS_PATTERNS, "builtin")
+
+
+# 装配生效规则：本地缓存 → 包内置 JSON → 上方 BUILTIN 兜底
+susdata.init()
 
 # ═══════════════════════════════════════════════════════════════
 # 已知模型家族 & 提供商

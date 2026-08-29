@@ -532,6 +532,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="启动报告查看服务器（默认端口 8080），可浏览历史扫描结果",
     )
     ap.add_argument(
+        "--refresh-sus",
+        action="store_true",
+        help="在线刷新可疑模型名规则集（厂商发新版后更新判定阈值，无需升级工具）",
+    )
+    ap.add_argument(
         "--models",
         "--list-models",
         action="store_true",
@@ -573,6 +578,18 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
             return 1
+        return 0
+
+    if args.refresh_sus:
+        from relay_audit import susdata
+
+        try:
+            version = susdata.refresh()
+        except Exception as e:
+            print(f"  [x] 规则集刷新失败: {e}", file=sys.stderr)
+            return 1
+        print(f"  [v] 可疑模型名规则集已更新: v{version}")
+        print(f"  缓存: {susdata.cache_path()}")
         return 0
 
     if args.config:

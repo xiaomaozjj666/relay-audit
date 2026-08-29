@@ -2,6 +2,8 @@
 
 import time
 
+import pytest
+
 from relay_audit.analysis import (
     analyze_chat,
     analyze_concurrent,
@@ -15,6 +17,16 @@ from relay_audit.analysis import (
     mojibake_score,
 )
 from relay_audit.models import ChatResult, ModelInfo, Severity
+
+
+@pytest.fixture(autouse=True)
+def _pin_bundled_sus_rules(tmp_path, monkeypatch):
+    """规则集钉在包内置版本，可疑名断言不受开发机本地缓存影响。"""
+    from relay_audit import patterns, susdata
+
+    monkeypatch.setenv("RELAY_AUDIT_DATA_DIR", str(tmp_path / "data"))
+    patterns._set_sus(*susdata.load_bundled())
+    yield
 
 
 def _r(**over) -> ChatResult:

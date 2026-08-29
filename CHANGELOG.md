@@ -6,6 +6,20 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.3] - 2026-08-29
+
+### 新增（可疑模型名规则集与代码分离）
+
+厂商发新版后，"不存在的版本"阈值天然会过时。规则数据自本版本起外置：
+
+- **susdata**: 新模块负责规则集的加载/校验/缓存/在线刷新。装配顺序
+  本地缓存 → 包内置 `data/sus_patterns.json` → 代码内兜底，三层容灾；
+  下载内容经严格校验（版本号、条目上限、正则合法性），失败不改动现有规则。
+- **cli**: 新增 `--refresh-sus`，拉取最新规则并缓存本地，无需升级工具。
+  可用 `RELAY_AUDIT_SUS_URL` 自定义源、`RELAY_AUDIT_DATA_DIR` 指定缓存目录。
+- **analysis**: "可疑/非标准模型名"发现现在标注所用规则集版本，报告可追溯。
+- **packaging**: wheel/sdist 携带 `data/sus_patterns.json`（package-data）。
+
 ## [2.3.2] - 2026-08-29
 
 ### 修复（可疑模型名阈值对齐 2026-08 真实版本）
@@ -101,7 +115,8 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...HEAD
+[2.3.3]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...v2.3.3
 [2.3.2]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...v2.3.2
 [2.3.1]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.0...v2.3.1
 [2.3.0]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.2.0...v2.3.0

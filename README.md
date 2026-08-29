@@ -44,7 +44,7 @@ flowchart LR
 ## 功能特性
 
 - **一条命令检测** — 仅需 `--base-url` 和 API Key；未指定模型时自动获取模型列表并挑选最强模型，交互模式（零参数启动）可自动并发检测 3 个最强模型
-- **身份与真实性** — 模型偷换检测、身份识别探针、知识截止日期验证、模型综合指纹、模型列表一致性、可疑/非标准模型名识别
+- **身份与真实性** — 模型偷换检测、身份识别探针、知识截止日期验证、模型综合指纹、模型列表一致性、可疑/非标准模型名识别（规则数据与代码分离，`--refresh-sus` 在线更新判定阈值，无需升级工具）
 - **安全审计** — System Prompt 完整性（随请求注入 canary 标记，检测系统消息被篡改或内容泄露）、危险内容拒答检测（破坏性删除、Cookie 窃取、勒索软件、反向 Shell、SQL 注入），结合危险内容模式与拒答模式双重判定
 - **质量检测** — 基础对话、指令遵循、多轮对话、长上下文、编码一致性、乱码检测、Token 计费校验；JSON 模式与 Function Calling 失败时自动降级为纯文本重试
 - **性能评估** — 延迟统计（p50 / 抖动；样本充足时含 p95 / p99）、稳定性采样、并发突发测试、流式响应（SSE）测试与首字延迟（TTFT）测量
@@ -159,6 +159,7 @@ relay-audit --serve 8080
 | `--config` | JSON 配置文件路径 | - |
 | `--save-key` | 保存 Key 到本地 | `false` |
 | `--models` / `--list-models` | 只展示模型列表，不跑测试 | `false` |
+| `--refresh-sus` | 在线刷新可疑模型名规则集并缓存本地 | `false` |
 | `--serve [PORT]` | 启动报告浏览服务器 | 8080 |
 
 > 注意：`--save-key` 将 API Key **明文**保存在 `~/.relay_key`。工具会收紧该文件权限
@@ -180,6 +181,8 @@ relay-audit --serve 8080
 | `RELAY_API_KEY` | API Key（也可用 `--key` 或 `--save-key` 提供） |
 | `RELAY_AUDIT_REPORTS_DIR` | 报告目录（默认 Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`） |
 | `RELAY_AUDIT_REPORT_TTL_DAYS` | 旧报告自动清理天数（默认 7，设 `0` 表示永不清理） |
+| `RELAY_AUDIT_SUS_URL` | 可疑模型名规则集的自定义下载地址（默认本项目 main 分支） |
+| `RELAY_AUDIT_DATA_DIR` | 规则缓存目录（默认 Windows `%LOCALAPPDATA%\relay-audit`，Linux/macOS `~/.relay_audit`） |
 
 如需使用其他环境变量名，通过 `--api-key-env <NAME>` 指定。
 

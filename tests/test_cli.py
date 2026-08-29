@@ -854,6 +854,28 @@ def test_main_serve(monkeypatch) -> None:
     assert captured["port"] == 8080
 
 
+def test_main_refresh_sus(monkeypatch, tmp_path, capsys) -> None:
+    """--refresh-sus 拉取成功 → 打印版本与缓存路径，返回 0。"""
+    monkeypatch.setenv("RELAY_AUDIT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("relay_audit.susdata.refresh", lambda: "2099.01.0")
+    assert cli.main(["--refresh-sus"]) == 0
+    out = capsys.readouterr().out
+    assert "2099.01.0" in out
+    assert "sus_patterns.json" in out
+
+
+def test_main_refresh_sus_failure(monkeypatch, tmp_path, capsys) -> None:
+    """--refresh-sus 拉取失败 → 友好报错，返回 1，不影响现有规则。"""
+
+    def boom():
+        raise RuntimeError("network down")
+
+    monkeypatch.setenv("RELAY_AUDIT_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setattr("relay_audit.susdata.refresh", boom)
+    assert cli.main(["--refresh-sus"]) == 1
+    assert "规则集刷新失败" in capsys.readouterr().err
+
+
 def test_main_serve_port_busy(monkeypatch, capsys) -> None:
     """端口被占用 → 友好提示并返回 1，不裸抛 traceback。"""
 

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "relay-audit"
-version = "2.3.2"
+version = "2.3.3"
 description = "OpenAI-compatible 中转 API 检测工具 — 安全、质量、身份验证审计"
 readme = "README.md"
 license = { text = "MIT" }
@@ -55,3 +55,6 @@ ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
 include = ["relay_audit*"]
+
+[tool.setuptools.package-data]
+relay_audit = ["data/*.json"]
