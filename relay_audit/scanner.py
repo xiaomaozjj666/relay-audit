@@ -24,19 +24,52 @@ from .patterns import short
 
 
 async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[str]:
-    """只获取模型列表（不跑测试），供 cli 自动选择模型使用"""
+    """只获取模型列表（不跑测试），供 cli 自动选择模型使用。"""
+    ids, _ = await fetch_models_with_status(base_url, api_key, timeout)
+    return ids
+
+
+class ModelsAuthError(RuntimeError):
+    """模型列表接口返回 401/403 — Key 无效、未开通或已被封禁。"""
+
+
+async def fetch_models_with_status(
+    base_url: str, api_key: str, timeout: int = 30
+) -> tuple[list[str], int]:
+    """获取模型列表并区分鉴权失败（401/403 → ModelsAuthError），返回 (ids, status)。"""
     async with ApiClient(base_url, api_key, timeout) as client:
-        _, raw, _, _, _ = await client.list_models()
+        status, raw, _, _, _ = await client.list_models()
+        if status in (401, 403):
+            raise ModelsAuthError(f"HTTP {status}")
         ids: list[str] = []
         if isinstance(raw, list):
             for item in raw:
                 if isinstance(item, dict) and isinstance(item.get("id"), str):
                     ids.append(item["id"])
-        return ids
+        return ids, status
 
 
 # ── 测试提示集合 ────────────────────────────────────────────
 # (可在此处自定义各测试的提示内容)
+
+
+# 长上下文探针：40 行确定性订单日志中埋一条 ERROR（07:42:19），要求找针。
+# 时间戳生成式保证 INFO 行不会撞车（分钟为 42 的行秒数是 58/38，秒为 19 的行不存在）。
+def _build_long_context_prompt() -> str:
+    lines = []
+    for i in range(1, 41):
+        ts = f"07:{(i * 3) % 60:02d}:{(i * 17) % 60:02d}"
+        lines.append(
+            f"2026-08-29 {ts} INFO service=orders req_id=R-{1000 + i} "
+            f"处理订单 #{i} 耗时 {20 + i % 7}ms"
+        )
+    lines[27] = "2026-08-29 07:42:19 ERROR service=payments req_id=R-1028 扣款失败: gateway timeout"
+    return (
+        "以下是一段服务日志，请通读后回答最后的问题。\n"
+        + "\n".join(lines)
+        + "\n问题：日志中唯一一条 ERROR 记录的时间戳（时:分:秒）是什么？只输出该时间戳。"
+    )
+
 
 # 探针套件版本：每次新增/修改/删除探针提示或对应判定规则时递增。
 # 该版本会写入扫描报告，保证不同时间的结果可复现、可对比。
@@ -46,7 +79,10 @@ async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[s
 # 2026.08.3: 校准——按 2026-08 真实版本更新可疑阈值：Claude Opus 5 已发布
 #           （放行 opus-5*），Gemini 3.x 已到 3.6（仅标 4+），Qwen 3.8-Max
 #           已发布（放行 3.8，标 3.9+/4+）。DeepSeek V4、GPT 5.6 维持原判。
-PROBE_SUITE_VERSION = "2026.08.3"
+# 2026.08.4: 体验校准——鉴权失败(401/403)前置检查即中止全量扫描；
+#           长上下文测试从"三句话总结"改为 40 行日志找针（真实验证长文本）；
+#           models 接口 401/403 给出明确鉴权提示。
+PROBE_SUITE_VERSION = "2026.08.4"
 
 PROMPTS = {
     "identity": '只输出JSON: {"model_self_id":"你觉得你是什么模型","provider":"你的提供商","canary":"RLY-42"}',
@@ -62,7 +98,8 @@ PROMPTS = {
         "4. 颜文字: (╯°□°)╯︵ ┻━┻\n"
         "5. 数学符号: ∑∫√∞≠≈"
     ),
-    "long_context": "请用3句话简单总结什么是云计算。我接下来会问你更长的内容。",
+    # ── 新增：长上下文找针 ──
+    "long_context": _build_long_context_prompt(),
     "concurrent": '只输出JSON: {"ok":true,"ts":<timestamp>}',
     "json_mode": "生成一个用户信息：姓名张三，年龄28，城市北京。",
     "multi_turn_q1": "我的名字是李明。",
@@ -125,6 +162,20 @@ class TestCase:
     response_format: dict | None = None
     tools: list[dict] | None = None
     stream: bool = False
+
+
+def _dedup_sort(findings: list[Finding]) -> list[Finding]:
+    """去重（同 title+category+model 保留最高严重级）并按严重度降序。
+
+    所有 ScanResult 出口（含提前中止路径）都必须经过这里，
+    否则同一问题会以多条重复发现出现在报告中。
+    """
+    seen: dict[tuple[str, str, str], Finding] = {}
+    for f in findings:
+        dedup_key = (f.title, f.category, f.model_name)
+        if dedup_key not in seen or f.severity.rank > seen[dedup_key].severity.rank:
+            seen[dedup_key] = f
+    return sorted(seen.values(), key=lambda x: x.severity.rank, reverse=True)
 
 
 async def run_scan(config: ScanConfig) -> ScanResult:
@@ -222,13 +273,14 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         )
                     )
 
-            if status == 401:
+            if status in (401, 403):
                 findings.append(
                     Finding(
                         Severity.CRITICAL,
                         "鉴权失败",
-                        "/v1/models 拒绝了 API key",
+                        f"/v1/models 返回 HTTP {status}",
                         "security",
+                        "Key 无效、未开通或已被封禁，请确认后重试",
                     )
                 )
             else:
@@ -243,6 +295,28 @@ async def run_scan(config: ScanConfig) -> ScanResult:
             findings.extend(analyze_model_swap(config.model, models))
 
         results.append(ping)
+        if not ping.ok and ping.status in (401, 403):
+            # 鉴权失败：后续全部测试必然失败，立即中止——
+            # 真实校准中曾把被封 Key 的 22 项测试全部白跑一遍
+            findings.append(
+                Finding(
+                    Severity.CRITICAL,
+                    "鉴权失败",
+                    f"前置检查返回 HTTP {ping.status}",
+                    "security",
+                    "Key 无效、未开通或已被封禁，请确认后重试",
+                )
+            )
+            duration = time.perf_counter() - t0_all
+            return ScanResult(
+                config=config,
+                findings=_dedup_sort(findings),
+                results=results,
+                models=models,
+                started_at=started_at,
+                duration_s=duration,
+                probe_suite=PROBE_SUITE_VERSION,
+            )
         if not ping.ok:
             findings.append(
                 Finding(
@@ -295,7 +369,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 duration = time.perf_counter() - t0_all
                 return ScanResult(
                     config=config,
-                    findings=findings,
+                    findings=_dedup_sort(findings),
                     results=results,
                     models=models,
                     started_at=started_at,
@@ -659,7 +733,6 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     request_timeout=tout,
                 )
                 sr.name = "流式响应"
-                sr.turn_count = 3
                 _progress(sr.name, sr)
                 results.append(sr)
                 findings.extend(analyze_chat(sr, "quality"))
@@ -741,20 +814,9 @@ async def run_scan(config: ScanConfig) -> ScanResult:
 
     duration = time.perf_counter() - t0_all
 
-    # 去重: 同 title + category + model_name 只保留最高严重等级的一条
-    seen: dict[tuple[str, str, str], Finding] = {}
-    for f in findings:
-        dedup_key = (f.title, f.category, f.model_name)
-        if dedup_key not in seen or f.severity.rank > seen[dedup_key].severity.rank:
-            seen[dedup_key] = f
-    findings = list(seen.values())
-
-    # 排序: 严重等级降序
-    findings_sorted = sorted(findings, key=lambda f: f.severity.rank, reverse=True)
-
     return ScanResult(
         config=config,
-        findings=findings_sorted,
+        findings=_dedup_sort(findings),
         results=results,
         models=models,
         started_at=started_at,

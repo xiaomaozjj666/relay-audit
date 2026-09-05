@@ -18,6 +18,10 @@ from relay_audit.patterns import (
     short,
 )
 
+# 长上下文找针测试的正确答案：埋在 scanner PROMPTS["long_context"] 日志中的
+# 唯一一条 ERROR 记录的时间戳（秒级即可，模型可能省略日期部分）
+LONG_CONTEXT_NEEDLE = "07:42:19"
+
 # ═══════════════════════════════════════════════════════════════
 # 乱码 & 编码检测
 # ═══════════════════════════════════════════════════════════════
@@ -446,6 +450,18 @@ def analyze_chat(result: ChatResult, kind: str = "quality") -> list[Finding]:
     enc = encoding_consistency(result.content)
     if not enc["ok"]:
         fs.append(Finding(Severity.LOW, "编码异常", f"{', '.join(enc['issues'])}", "quality", ""))
+
+    # 长上下文找针：要求通读 40 行日志后输出唯一 ERROR 的时间戳
+    if result.name == "长上下文" and LONG_CONTEXT_NEEDLE not in result.content:
+        fs.append(
+            Finding(
+                Severity.LOW,
+                "长上下文要点遗漏",
+                short(result.content, 200),
+                "quality",
+                "未能从长日志中定位指定的 ERROR 时间戳，长文本理解能力存疑",
+            )
+        )
 
     # 身份检测
     if kind == "identity":

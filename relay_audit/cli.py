@@ -17,7 +17,7 @@ from typing import Any
 from . import __version__
 from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult
 from .reporter import print_json, print_terminal, save_report
-from .scanner import fetch_models, run_scan
+from .scanner import ModelsAuthError, fetch_models, run_scan
 
 # ── 工具函数 ──────────────────────────────────────────────────
 
@@ -235,7 +235,14 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     if not config.model:
         if not config.quiet:
             print("  [i] 未指定模型，正在获取模型列表...")
-        ids = asyncio.run(fetch_models(config.base_url, key, config.timeout))
+        try:
+            ids = asyncio.run(fetch_models(config.base_url, key, config.timeout))
+        except ModelsAuthError:
+            print(
+                "  [x] 鉴权失败：Key 无效、未开通或已被封禁（模型列表返回 401/403）",
+                file=sys.stderr,
+            )
+            return 2, "", None
         if not ids:
             print("  [x] 无法获取模型列表，请用 --model 手动指定", file=sys.stderr)
             return 2, "", None
@@ -294,7 +301,11 @@ def cmd_list_models(args: argparse.Namespace) -> int:
     if not key:
         print("错误: API Key 未设置", file=sys.stderr)
         return 2
-    ids = asyncio.run(fetch_models(args.base_url, key, args.timeout or 60))
+    try:
+        ids = asyncio.run(fetch_models(args.base_url, key, args.timeout or 60))
+    except ModelsAuthError:
+        print("  [x] 鉴权失败：Key 无效、未开通或已被封禁", file=sys.stderr)
+        return 2
     if not ids:
         print("  [x] 无法获取模型列表", file=sys.stderr)
         return 1
@@ -308,7 +319,8 @@ def cmd_list_models(args: argparse.Namespace) -> int:
 def interactive() -> int:
     """交互模式 — 只需 Key 和地址，全自动检测"""
     # 启用 Windows 终端 ANSI/UTF-8 转义码支持（VIRTUAL_TERMINAL_PROCESSING）
-    os.system("")  # type: ignore
+    if sys.platform == "win32":
+        os.system("")  # type: ignore
 
     while True:
         print()
@@ -350,6 +362,9 @@ def interactive() -> int:
         print("  [3/3] 正在获取模型列表...")
         try:
             ids = asyncio.run(fetch_models(url, key, 30))
+        except ModelsAuthError:
+            print("  [x] 鉴权失败：Key 无效、未开通或已被封禁")
+            ids = []
         except Exception as e:
             print(f"  [x] 获取模型列表失败: {e}")
             ids = []
@@ -499,6 +514,9 @@ def build_parser() -> argparse.ArgumentParser:
   # 无参数 = 交互模式
   relay-audit
 """,
+    )
+    ap.add_argument(
+        "--version", action="version", version=f"relay-audit {__version__}", help="显示版本号"
     )
     ap.add_argument("--base-url", help="API 端点地址")
     ap.add_argument("--model", default="", help="检测模型名（不填则自动选择）")

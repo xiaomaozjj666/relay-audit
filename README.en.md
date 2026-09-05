@@ -37,6 +37,13 @@ relay-audit --base-url https://api.example.com
 
 Run `relay-audit` with no arguments for an interactive mode: it masks key input, fetches the model list, auto-picks the top models, and runs concurrent scans.
 
+Want to try the full workflow without a real key? Spin up the bundled mock relay:
+
+```bash
+python scripts/mock_relay.py --port 8931          # add --ban-after N to simulate a banned key mid-scan
+relay-audit --base-url http://127.0.0.1:8931 --stream
+```
+
 ## Output
 
 - Colorful terminal report (rich)

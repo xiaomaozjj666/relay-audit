@@ -86,6 +86,13 @@ def persist_result(result: Any, base_url: str) -> str:
     return str(filepath)
 
 
+def _fmt_ts(ts: str) -> str:
+    """20260905_185728 → 2026-09-05 18:57:28（与 HTML 报告列表展示一致）。"""
+    if re.fullmatch(r"\d{8}_\d{6}", ts or ""):
+        return f"{ts[:4]}-{ts[4:6]}-{ts[6:8]} {ts[9:11]}:{ts[11:13]}:{ts[13:15]}"
+    return ts
+
+
 def list_json_reports() -> list[dict]:
     """Return sorted list of past JSON scan reports."""
     if not REPORTS_DIR.is_dir():
@@ -99,7 +106,7 @@ def list_json_reports() -> list[dict]:
                 {
                     "type": "json",
                     "file": f.name,
-                    "timestamp": data.get("timestamp", ""),
+                    "timestamp": _fmt_ts(data.get("timestamp", "")),
                     "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(data.get("base_url", "") or ""),
                     "risk_level": data.get("summary", {}).get("risk_level", ""),

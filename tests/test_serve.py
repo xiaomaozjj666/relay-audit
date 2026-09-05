@@ -156,7 +156,7 @@ def test_list_reports_merged_sorted(tmp_path, monkeypatch) -> None:
     # 先写 JSON（mtime 更旧），再写 HTML（mtime 更新）→ 列表应 HTML 在前
     jf = tmp_path / "scan_20260710_100000_abc.json"
     jf.write_text(
-        '{"timestamp":"20260710","base_url":"https://b","summary":{"risk_level":"LOW"}}',
+        '{"timestamp":"20260710_100000","base_url":"https://b","summary":{"risk_level":"LOW"}}',
         encoding="utf-8",
     )
     hf = tmp_path / "relay_report_20260711_100000.html"
@@ -172,6 +172,8 @@ def test_list_reports_merged_sorted(tmp_path, monkeypatch) -> None:
     os.utime(jf, (1700000000, 1700000000))
     os.utime(hf, (1700000100, 1700000100))
     reports = serve.list_reports()
+    # JSON 报告时间戳展示格式与 HTML 一致
+    assert reports[-1]["timestamp"] == "2026-07-10 10:00:00"
     assert [r["type"] for r in reports] == ["html", "json"]
     assert reports[0]["mtime"] > reports[1]["mtime"]
 

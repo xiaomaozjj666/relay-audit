@@ -876,6 +876,59 @@ def test_main_refresh_sus_failure(monkeypatch, tmp_path, capsys) -> None:
     assert "规则集刷新失败" in capsys.readouterr().err
 
 
+def test_main_version_flag(capsys) -> None:
+    """--version 输出版本号并以 0 退出。"""
+    from relay_audit import __version__
+
+    with pytest.raises(SystemExit) as e:
+        cli.main(["--version"])
+    assert e.value.code == 0
+    assert __version__ in capsys.readouterr().out
+
+
+def test_execute_scan_models_auth_error(monkeypatch, capsys) -> None:
+    """自动选模型时 models 接口 401 → 明确鉴权提示，退出码 2。"""
+
+    def auth_boom(*a, **k):
+        raise cli.ModelsAuthError("HTTP 401")
+
+    monkeypatch.setattr(cli, "fetch_models", auth_boom)
+    monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk-x"})
+    config = cli.ScanConfig(base_url="https://x", model="")
+    assert cli.execute_scan(config) == (2, "", None)
+    assert "鉴权失败" in capsys.readouterr().err
+
+
+def test_cmd_list_models_auth_error(monkeypatch, capsys) -> None:
+    def auth_boom(*a, **k):
+        raise cli.ModelsAuthError("HTTP 403")
+
+    monkeypatch.setattr(cli, "fetch_models", auth_boom)
+    args = cli.build_parser().parse_args(["--base-url", "https://x", "--models"])
+    assert cli.cmd_list_models(args) == 2
+    assert "鉴权失败" in capsys.readouterr().err
+
+
+def test_interactive_models_auth_error(monkeypatch, capsys) -> None:
+    """交互模式鉴权失败 → 明确提示后询问重试，输入 n 退出。
+
+    input 按序应答：URL 必须给合法地址（否则交互循环不会往下走），
+    之后重试询问回答 n。
+    """
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "sk-saved")
+    monkeypatch.setattr(cli.os, "environ", {})
+    monkeypatch.setattr(cli.getpass, "getpass", lambda p: "sk-in")
+    answers = iter(["http://127.0.0.1:1", "n"])
+    monkeypatch.setattr("builtins.input", lambda p="": next(answers))
+
+    def auth_boom(*a, **k):
+        raise cli.ModelsAuthError("HTTP 401")
+
+    monkeypatch.setattr(cli, "fetch_models", auth_boom)
+    assert cli.interactive() == 0
+    assert "鉴权失败" in capsys.readouterr().out
+
+
 def test_main_serve_port_busy(monkeypatch, capsys) -> None:
     """端口被占用 → 友好提示并返回 1，不裸抛 traceback。"""
 

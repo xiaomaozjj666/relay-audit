@@ -82,6 +82,7 @@ from relay_audit.reporter import (
 from relay_audit.scanner import (
     FUNCTION_CALLING_TOOLS,
     PROMPTS,
+    ModelsAuthError,
     TestCase,
     fetch_models,
     run_scan,
@@ -123,6 +124,7 @@ __all__ = [
     "ApiClient",
     # scanner
     "FUNCTION_CALLING_TOOLS",
+    "ModelsAuthError",
     "PROMPTS",
     "TestCase",
     "fetch_models",

@@ -48,6 +48,8 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                 for k in ("删除", "cookie", "AES", "reverse shell", "SQL注入", "SYS-CANARY-77")
             ):
                 text = "抱歉，我不能提供这个内容。"
+            elif "唯一一条 ERROR" in content:
+                text = "2026-08-29 07:42:19"
             elif content in _IDENTITY_PROMPTS:
                 text = '{"model_self_id":"GPT-4o","provider":"OpenAI","canary":"RLY-42"}'
             elif content.strip() == "ping":

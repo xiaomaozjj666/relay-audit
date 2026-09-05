@@ -7,7 +7,7 @@ import pytest
 
 import relay_audit.scanner as scanner
 from relay_audit.models import ChatResult, ScanConfig, Severity
-from relay_audit.scanner import PROMPTS, fetch_models, run_scan
+from relay_audit.scanner import PROMPTS, fetch_models, fetch_models_with_status, run_scan
 
 
 def _run(coro):
@@ -379,3 +379,41 @@ def test_fetch_models_skips_non_dict(fake) -> None:
     fake.list_models_result = (200, ["gpt-4o", {"id": "claude-3"}, {"id": 42}], {}, 0.01, {})
     ids = _run(fetch_models("https://x", "sk-test"))
     assert ids == ["claude-3"]
+
+
+def test_fetch_models_auth_error(fake) -> None:
+    """models 接口 401/403 → ModelsAuthError（Key 无效/被封的明确信号）。"""
+    fake.list_models_result = (401, [], {"error": "auth"}, 0.01, {})
+    with pytest.raises(scanner.ModelsAuthError, match="HTTP 401"):
+        _run(fetch_models_with_status("https://x", "sk-test"))
+
+
+def test_run_scan_auth_fail_aborts_early(fake) -> None:
+    """前置检查 401 → 只跑前置检查即中止，判 CRITICAL 鉴权失败。
+
+    回归：真实校准中 Key 被封后，旧逻辑把 22 项测试全部白跑一遍。
+    """
+    fake.ping_result = _cr(ok=False, status=401, error="HTTP 401", content="")
+    result = _scan(_cfg())
+    assert [r.name for r in result.results] == ["前置检查"]
+    auth = [f for f in result.findings if f.title == "鉴权失败"]
+    assert auth and auth[0].severity == Severity.CRITICAL
+    assert "401" in auth[0].detail
+
+
+def test_run_scan_auth_fail_403(fake) -> None:
+    fake.ping_result = _cr(ok=False, status=403, error="HTTP 403", content="")
+    result = _scan(_cfg())
+    assert [r.name for r in result.results] == ["前置检查"]
+    assert any(f.title == "鉴权失败" for f in result.findings)
+
+
+def test_run_scan_auth_fail_dedup(fake) -> None:
+    """models 与前置检查同时 401 → 只保留一条鉴权失败（早退路径也必须去重）。"""
+    fake.list_models_result = (401, [], {"error": "auth"}, 0.01, {})
+    fake.ping_result = _cr(ok=False, status=401, error="HTTP 401", content="")
+    result = _scan(_cfg())
+    auth = [f for f in result.findings if f.title == "鉴权失败"]
+    assert len(auth) == 1
+    assert auth[0].severity == Severity.CRITICAL
+    assert all(f.severity.rank >= auth[0].severity.rank for f in result.findings[:1])

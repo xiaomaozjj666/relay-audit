@@ -6,6 +6,34 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.5] - 2026-08-29
+
+### 新增（体验校准 · 第二轮实测驱动）
+
+基于本地仿真中转站的全流程实测反馈：
+
+- **scanner**: 前置检查返回 401/403 时立即中止全量扫描并判 CRITICAL"鉴权失败"——
+  此前 Key 被封后会把 22 项测试全部白跑一遍，再报一个误导性的
+  "大量测试返回相同错误"。
+- **scanner**: `/v1/models` 返回 401/403 时抛 `ModelsAuthError`，CLI 与交互模式
+  给出"Key 无效、未开通或已被封禁"的明确提示（退出码 2）。
+- **scanner**: 长上下文测试从"三句话总结云计算"改为 40 行确定性日志找针
+  （找出唯一一条 ERROR 的时间戳），真正检验长文本理解；找不到要点报 LOW
+  "长上下文要点遗漏"。
+- **cli**: 新增 `--version`。
+- **scripts/mock_relay.py**: 本地仿真中转站（标准模型列表、流式 SSE、
+  JSON 模式、Function Calling、恶意请求拒答、`--ban-after N` 模拟扫描中途
+  被封），可安全体验/演示完整检测流程，不花真钱、不冒封号风险。
+
+### 修复
+
+- **scanner**: 所有 `ScanResult` 出口统一经过去重排序（提前中止路径此前
+  跳过去重——models 与前置检查同时 401 时会出现两条重复的"鉴权失败"）。
+- **cli**: 交互模式仅在 Windows 上启用 ANSI 转义（`os.system("")` 不再在
+  POSIX 上空起一个 shell）。
+
+探针套件 2026.08.4。
+
 ## [2.3.4] - 2026-08-29
 
 ### 修复
@@ -122,7 +150,8 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.4...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.5...HEAD
+[2.3.5]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.4...v2.3.5
 [2.3.4]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...v2.3.4
 [2.3.3]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...v2.3.3
 [2.3.2]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.1...v2.3.2

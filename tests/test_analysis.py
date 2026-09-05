@@ -487,6 +487,21 @@ def test_analyze_chat_prompt_isolation() -> None:
     assert not any("Prompt 隔离失效" in f.title for f in fs3)
 
 
+def test_analyze_chat_long_context_needle() -> None:
+    """长上下文找针：找到埋入的 ERROR 时间戳 → 不报；找不到 → LOW。"""
+    r = ChatResult("长上下文", "gpt-4o", True, 100, 200, "gpt-4o", "2026-08-29 07:42:19", {}, "", 0)
+    assert not any("长上下文要点遗漏" in f.title for f in analyze_chat(r, "quality"))
+
+    r2 = ChatResult("长上下文", "gpt-4o", True, 100, 200, "gpt-4o", "抱歉，我没有找到。", {}, "", 0)
+    fs2 = analyze_chat(r2, "quality")
+    miss = [f for f in fs2 if "长上下文要点遗漏" in f.title]
+    assert miss and miss[0].severity == Severity.LOW
+
+    # 失败结果在 analyze_chat 早退分支，不触发找针判定
+    r3 = ChatResult("长上下文", "gpt-4o", False, 100, 0, "gpt-4o", "", {}, "", 0, "HTTP 0")
+    assert not any("长上下文要点遗漏" in f.title for f in analyze_chat(r3, "quality"))
+
+
 def test_analyze_chat_knowledge_probe() -> None:
     r = ChatResult("知识探针", "gpt-4o", True, 100, 200, "gpt-4o", "我了解2027年的事件", {}, "", 0)
     fs = analyze_chat(r, "identity")

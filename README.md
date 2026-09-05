@@ -137,6 +137,10 @@ relay-audit --base-url https://api.example.com --output report.html
 
 # 启动报告浏览服务器（浏览历史扫描结果）
 relay-audit --serve 8080
+
+# 本地仿真中转站：安全体验完整检测流程（不花真钱、无封号风险）
+python scripts/mock_relay.py --port 8931
+relay-audit --base-url http://127.0.0.1:8931 --stream
 ```
 
 ## 命令行参数
