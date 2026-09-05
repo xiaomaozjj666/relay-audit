@@ -16,7 +16,13 @@ from typing import Any
 
 from . import __version__
 from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult
-from .reporter import print_json, print_terminal, save_report
+from .reporter import (
+    compute_pass_rate,
+    print_json,
+    print_model_comparison,
+    print_terminal,
+    save_report,
+)
 from .scanner import ModelsAuthError, fetch_models, run_scan
 
 # ── 工具函数 ──────────────────────────────────────────────────
@@ -331,6 +337,10 @@ def interactive() -> int:
 
         # API Key 用 getpass 掩码输入（无 TTY 时回退明文 input）
         def _prompt_key() -> str:
+            # Windows 的 getpass 走控制台而非 stdin：管道/重定向调用交互模式
+            # 会永久阻塞（实测），非 TTY 时直接读 stdin
+            if not sys.stdin.isatty():
+                return input("  [1/3] API Key > ").strip()
             try:
                 return getpass.getpass("  [1/3] API Key > ").strip()
             except (EOFError, KeyboardInterrupt):
@@ -425,19 +435,38 @@ def interactive() -> int:
         all_findings: list[Finding] = []
         all_results_list: list[ChatResult] = []
         total_duration = 0.0
+        comparison_rows: list[dict[str, Any]] = []
         for model, scan_result in scan_results:
             if not scan_result:
+                print(f"  [x] {model}: 扫描失败")
                 continue
             for f in scan_result.findings:
                 f.model_name = model
             all_findings.extend(scan_result.findings)
             all_results_list.extend(scan_result.results)
-            total_duration += scan_result.duration_s
-            high = sum(1 for f in scan_result.findings if f.severity.rank >= 3)
+            # 各模型并发扫描，总耗时取最长而非累加
+            total_duration = max(total_duration, scan_result.duration_s)
+            ok_passed, ok_total = compute_pass_rate(scan_result.results)
+            ok_lats = [r.latency_ms for r in scan_result.results if r.ok]
+            avg_lat = int(sum(ok_lats) / len(ok_lats)) if ok_lats else 0
+            comparison_rows.append(
+                {
+                    "model": model,
+                    "risk": scan_result.risk_level,
+                    "high": scan_result.high_count,
+                    "med": scan_result.med_count,
+                    "low": scan_result.low_count,
+                    "passed": f"{ok_passed}/{ok_total}",
+                    "avg_lat": avg_lat,
+                }
+            )
+            high = scan_result.high_count
             if high:
                 print(f"  [!] {model}: 发现 {high} 个高危问题")
             else:
                 print(f"  [OK] {model}: 未发现高危问题")
+
+        print_model_comparison(comparison_rows)
 
         try:
             from .scanner import PROBE_SUITE_VERSION

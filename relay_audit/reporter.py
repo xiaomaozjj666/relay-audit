@@ -233,6 +233,47 @@ def print_json(result: ScanResult) -> None:
     print(json.dumps(result.to_dict(), ensure_ascii=False, indent=2))
 
 
+def print_model_comparison(rows: list[dict[str, Any]]) -> None:
+    """交互模式多模型对比汇总表。
+
+    rows 每项: {model, risk, high, med, low, passed, avg_lat}
+    """
+    if not rows:
+        return
+    try:
+        from rich import box
+        from rich.console import Console
+        from rich.table import Table
+
+        table = Table(box=box.ROUNDED, title="多模型对比", title_style="bold")
+        table.add_column("模型", min_width=12)
+        table.add_column("风险", width=8, justify="center")
+        table.add_column("高危", width=6, justify="center")
+        table.add_column("中危", width=6, justify="center")
+        table.add_column("低危", width=6, justify="center")
+        table.add_column("通过", width=8, justify="center")
+        table.add_column("平均延迟", width=10, justify="right")
+        risk_style = {"HIGH": "bold red", "MEDIUM": "bold yellow", "LOW": "bold green"}
+        for r in rows:
+            style = risk_style.get(r["risk"], "bold white")
+            table.add_row(
+                r["model"],
+                f"[{style}]{r['risk']}[/]",
+                str(r["high"]),
+                str(r["med"]),
+                str(r["low"]),
+                r["passed"],
+                f"{r['avg_lat']}ms",
+            )
+        Console().print(table)
+    except ImportError:
+        for r in rows:
+            print(
+                f"  {r['model']}: {r['risk']} 高{r['high']} 中{r['med']} 低{r['low']} "
+                f"通过 {r['passed']} 平均 {r['avg_lat']}ms"
+            )
+
+
 # ═══════════════════════════════════════════════════════════════
 # HTML 报告生成
 # ═══════════════════════════════════════════════════════════════

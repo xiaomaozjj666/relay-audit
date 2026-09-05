@@ -6,6 +6,19 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.6] - 2026-09-05
+
+### 新增（体验打磨 · 第三轮实测驱动）
+
+- **cli**: 交互模式多模型检测新增对比汇总表（模型 / 风险 / 高中低危 /
+  通过率 / 平均延迟一览）；并发扫描的总耗时口径从"累加"改为"取最长"。
+- **scanner**: 扫描进度标记从 `[OK]`/`[x ]` 改为更醒目的 `✓`/`✗`。
+
+### 修复
+
+- **cli**: 管道/重定向调用交互模式会永久卡死——Windows 的 getpass 读控制台
+  而非 stdin（真机实测发现）。非 TTY 时跳过 getpass 直接读 stdin。
+
 ## [2.3.5] - 2026-08-29
 
 ### 新增（体验校准 · 第二轮实测驱动）
@@ -150,7 +163,8 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.5...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.6...HEAD
+[2.3.6]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.5...v2.3.6
 [2.3.5]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.4...v2.3.5
 [2.3.4]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...v2.3.4
 [2.3.3]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.2...v2.3.3

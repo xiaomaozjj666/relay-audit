@@ -198,7 +198,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
     def _progress(name: str, r: ChatResult) -> None:
         """单测完成即打印一行，让长扫描有实时反馈"""
         if not config.quiet:
-            mark = "[OK]" if r.ok else "[x ]"
+            mark = "✓" if r.ok else "✗"
             print(f"    {mark} {name} ({r.latency_ms}ms)", flush=True)
 
     # 全局并发信号量：连接池上限 64，留余量给重试/降级

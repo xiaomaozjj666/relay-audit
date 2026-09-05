@@ -460,7 +460,10 @@ def _interactive_inputs(values):
 
 
 def _mock_getpass(monkeypatch, values):
+    """模拟 TTY 场景的掩码输入：钉住 isatty=True（pytest 下 stdin 是管道，
+    交互模式会走 input 分支，导致各测试的应答序列错位一位）。"""
     it = iter(values)
+    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: True})())
     monkeypatch.setattr(cli.getpass, "getpass", lambda prompt="": next(it))
 
 
@@ -492,6 +495,7 @@ def test_interactive_flow(monkeypatch, capsys) -> None:
     assert saved["key"] == "sk-test"
     out = capsys.readouterr().out
     assert "并发扫描 3 个模型" in out
+    assert "多模型对比" in out  # 对比汇总表
     assert "报告: interactive.html" in out
     assert "再见" in out
 
@@ -530,6 +534,37 @@ def test_interactive_scan_failure(monkeypatch, capsys) -> None:
     assert cli.interactive() == 0
     err = capsys.readouterr().err
     assert "扫描失败" in err
+
+
+def test_interactive_non_tty_skips_getpass(monkeypatch, capsys) -> None:
+    """非 TTY（管道）调用交互模式：直接读 stdin，不碰会永久阻塞的 getpass。"""
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
+    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: False})())
+
+    def getpass_must_not_run(prompt=""):
+        raise AssertionError("非 TTY 下不应调用 getpass")
+
+    monkeypatch.setattr(cli.getpass, "getpass", getpass_must_not_run)
+    saved = {}
+    monkeypatch.setattr(cli, "_save_key_to_file", saved.update)
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "x.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(
+        "builtins.input",
+        _interactive_inputs(["sk-piped", "n", "https://api.example.com", "", "n"]),
+    )
+    assert cli.interactive() == 0
+    out = capsys.readouterr().out
+    assert "并发扫描 1 个模型" in out
 
 
 def test_interactive_fetch_fails(monkeypatch, capsys) -> None:
@@ -743,10 +778,40 @@ def test_interactive_getpass_interrupt(monkeypatch) -> None:
     def bad_getpass(prompt=""):
         raise KeyboardInterrupt()
 
+    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: True})())
     monkeypatch.setattr(cli.getpass, "getpass", bad_getpass)
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
     with pytest.raises(KeyboardInterrupt):
         cli.interactive()
+
+
+def test_interactive_getpass_generic_error_falls_back(monkeypatch, capsys) -> None:
+    """getpass 抛其他异常 → 回退明文 input 继续流程。"""
+    monkeypatch.setattr(cli.sys, "stdin", type("S", (), {"isatty": lambda self: True})())
+
+    def bad_getpass(prompt=""):
+        raise RuntimeError("no terminal")
+
+    monkeypatch.setattr(cli.getpass, "getpass", bad_getpass)
+    monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
+    monkeypatch.setattr(cli, "_save_key_to_file", lambda k: None)
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "r.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
+
+    async def fake_fetch(*a, **k):
+        return ["gpt-4o"]
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    monkeypatch.setattr(cli, "fetch_models", fake_fetch)
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr(
+        "builtins.input",
+        _interactive_inputs(["sk-fallback", "n", "https://api.example.com", "", "n"]),
+    )
+    assert cli.interactive() == 0
+    assert "并发扫描 1 个模型" in capsys.readouterr().out
 
 
 def test_interactive_model_selection_empty_parts(monkeypatch, capsys) -> None:
@@ -917,7 +982,7 @@ def test_interactive_models_auth_error(monkeypatch, capsys) -> None:
     """
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "sk-saved")
     monkeypatch.setattr(cli.os, "environ", {})
-    monkeypatch.setattr(cli.getpass, "getpass", lambda p: "sk-in")
+    _mock_getpass(monkeypatch, ["sk-in"])
     answers = iter(["http://127.0.0.1:1", "n"])
     monkeypatch.setattr("builtins.input", lambda p="": next(answers))
 

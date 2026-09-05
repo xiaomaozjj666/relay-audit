@@ -235,6 +235,61 @@ def test_print_rich_streaming_ttft_and_probe(capsys) -> None:
     assert "探针" not in out2
 
 
+def test_print_model_comparison(capsys) -> None:
+    """多模型对比表：正常路径渲染 rich 表格。"""
+    rows = [
+        {
+            "model": "gpt-4o",
+            "risk": "HIGH",
+            "high": 2,
+            "med": 1,
+            "low": 0,
+            "passed": "12/15",
+            "avg_lat": 850,
+        },
+        {
+            "model": "claude-3",
+            "risk": "LOW",
+            "high": 0,
+            "med": 0,
+            "low": 1,
+            "passed": "15/15",
+            "avg_lat": 420,
+        },
+    ]
+    reporter.print_model_comparison(rows)
+    out = capsys.readouterr().out
+    assert "多模型对比" in out
+    assert "gpt-4o" in out and "12/15" in out and "850ms" in out
+
+    # 空列表不输出任何内容
+    reporter.print_model_comparison([])
+    assert capsys.readouterr().out == ""
+
+
+def test_print_model_comparison_plain_fallback(monkeypatch, capsys) -> None:
+    """rich 不可用时退化为纯文本行。"""
+    import sys
+
+    for mod in ("rich", "rich.box", "rich.console", "rich.table"):
+        monkeypatch.setitem(sys.modules, mod, None)
+    reporter.print_model_comparison(
+        [
+            {
+                "model": "m1",
+                "risk": "LOW",
+                "high": 0,
+                "med": 0,
+                "low": 0,
+                "passed": "5/5",
+                "avg_lat": 100,
+            }
+        ]
+    )
+    out = capsys.readouterr().out
+    assert "m1: LOW 高0 中0 低0 通过 5/5 平均 100ms" in out
+
+
 def test_print_terminal_rich(capsys) -> None:
     reporter.print_terminal(_scan(findings=[Finding(Severity.INFO, "info", "d")]))
     out = capsys.readouterr().out
