@@ -43,7 +43,7 @@ flowchart LR
 
 ## 功能特性
 
-- **一条命令检测** — 仅需 `--base-url` 和 API Key；未指定模型时自动获取模型列表并挑选最强模型，交互模式（零参数启动）可自动并发检测 3 个最强模型
+- **一条命令检测** — 仅需 `--base-url` 和 API Key；未指定模型时自动获取模型列表并挑选最强模型，交互模式（零参数启动）可自动并发检测 3 个最强模型，结束后输出「多模型对比」汇总表
 - **身份与真实性** — 模型偷换检测、身份识别探针、知识截止日期验证、模型综合指纹、模型列表一致性、可疑/非标准模型名识别（规则数据与代码分离，`--refresh-sus` 在线更新判定阈值，无需升级工具）
 - **安全审计** — System Prompt 完整性（随请求注入 canary 标记，检测系统消息被篡改或内容泄露）、危险内容拒答检测（破坏性删除、Cookie 窃取、勒索软件、反向 Shell、SQL 注入），结合危险内容模式与拒答模式双重判定
 - **质量检测** — 基础对话、指令遵循、多轮对话、长上下文、编码一致性、乱码检测、Token 计费校验；JSON 模式与 Function Calling 失败时自动降级为纯文本重试
@@ -95,6 +95,8 @@ relay-audit
 
 按提示输入 Key（**掩码显示，不回显明文**）和地址，工具会自动获取模型列表并选择最强的 3 个模型并发检测。检测前可确认或挑选模型：直接回车全部检测，或输入序号（如 `1,2`）、模型名（如 `claude` 模糊匹配）筛选。
 
+并发检测结束后输出 rich「多模型对比」汇总表，按模型一行列出风险等级、高中低危数量、通过率与平均延迟，多个模型的表现一览无余。
+
 Windows 下也可直接运行仓库中的 `relay_audit.bat`。
 
 ### 退出码
@@ -106,7 +108,7 @@ Windows 下也可直接运行仓库中的 `relay_audit.bat`。
 | `2` | 参数或 API Key 错误 |
 | `130` | 用户取消（Ctrl+C） |
 
-> 扫描过程实时输出每项测试的进度（`[OK]` / `[x ]` + 延迟），长扫描无需干等。
+> 扫描过程实时输出每项测试的进度（`✓` / `✗` + 延迟），长扫描无需干等。
 
 ## 使用示例
 
@@ -147,6 +149,7 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 
 | 参数 | 说明 | 默认值 |
 |------|------|--------|
+| `--version` | 显示版本号 | - |
 | `--base-url` | API 端点地址 | 必填 |
 | `--model` | 指定检测模型 | 自动选择 |
 | `--key` | API Key（优先于环境变量） | - |
@@ -185,7 +188,7 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `RELAY_API_KEY` | API Key（也可用 `--key` 或 `--save-key` 提供） |
 | `RELAY_AUDIT_REPORTS_DIR` | 报告目录（默认 Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`） |
 | `RELAY_AUDIT_REPORT_TTL_DAYS` | 旧报告自动清理天数（默认 7，设 `0` 表示永不清理） |
-| `RELAY_AUDIT_SUS_URL` | 可疑模型名规则集的自定义下载地址（默认本项目 main 分支） |
+| `RELAY_AUDIT_SUS_URL` | 可疑模型名规则集的自定义下载地址（默认本项目 master 分支） |
 | `RELAY_AUDIT_DATA_DIR` | 规则缓存目录（默认 Windows `%LOCALAPPDATA%\relay-audit`，Linux/macOS `~/.relay_audit`） |
 
 如需使用其他环境变量名，通过 `--api-key-env <NAME>` 指定。
@@ -252,15 +255,19 @@ relay-audit-calibrate targets.json            # 或 python -m relay_audit.calibr
 relay_audit/
 ├── __init__.py       # 包入口与版本信息
 ├── __main__.py       # python -m relay_audit 入口
+├── _version.py       # 版本号单一来源
 ├── cli.py            # 命令行入口 & 交互模式
 ├── models.py         # 数据类型定义
 ├── patterns.py       # 检测模式与常量定义
+├── susdata.py        # 可疑模型名规则集（内置 + 缓存 + 在线刷新）
 ├── analysis.py       # 分析检测逻辑（错误诊断、稳定性、并发等）
 ├── client.py         # OpenAI API 异步客户端
 ├── scanner.py        # 测试编排与执行
 ├── calibrate.py      # 检测有效性校准（混淆矩阵 / 精确率 / 召回率）
 ├── reporter.py       # 报告生成（HTML / 终端 / JSON）
-└── serve.py          # 报告浏览 Web 服务器
+├── serve.py          # 报告浏览 Web 服务器
+└── data/
+    └── sus_patterns.json  # 内置可疑模型名规则数据
 ```
 
 ## 开发
