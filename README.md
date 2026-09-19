@@ -5,6 +5,7 @@
   <img src="https://img.shields.io/badge/httpx-async-0F6B9E" alt="httpx" />
   <img src="https://img.shields.io/badge/rich-terminal-FFC300" alt="rich" />
   <img src="https://img.shields.io/badge/tests-pytest-brightgreen" alt="pytest" />
+  <a href="https://github.com/xiaomaozjj666/relay-audit/actions/workflows/ci.yml"><img src="https://github.com/xiaomaozjj666/relay-audit/actions/workflows/ci.yml/badge.svg" alt="CI" /></a>
   <img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT License" />
 </p>
 
