@@ -30,18 +30,18 @@ def _pin_bundled_sus_rules(tmp_path, monkeypatch):
 
 
 def _r(**over) -> ChatResult:
-    base = dict(
-        name="t",
-        model_req="gpt-4o",
-        ok=True,
-        latency_ms=100,
-        status=200,
-        model_ret="gpt-4o",
-        content="正常内容",
-        usage={},
-        raw_id="",
-        created=0,
-    )
+    base = {
+        "name": "t",
+        "model_req": "gpt-4o",
+        "ok": True,
+        "latency_ms": 100,
+        "status": 200,
+        "model_ret": "gpt-4o",
+        "content": "正常内容",
+        "usage": {},
+        "raw_id": "",
+        "created": 0,
+    }
     base.update(over)
     return ChatResult(**base)
 

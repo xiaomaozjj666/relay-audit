@@ -13,16 +13,16 @@ from relay_audit.models import ChatResult, Finding, ScanConfig, ScanResult, Seve
 
 
 def _scan_result(**over) -> ScanResult:
-    base = dict(
-        config=ScanConfig(base_url="https://api.example.com?x=1&y=2", model="gpt-4o"),
-        findings=[Finding(Severity.HIGH, "高危", "detail", "identity")],
-        results=[
+    base = {
+        "config": ScanConfig(base_url="https://api.example.com?x=1&y=2", model="gpt-4o"),
+        "findings": [Finding(Severity.HIGH, "高危", "detail", "identity")],
+        "results": [
             ChatResult("基础对话", "gpt-4o", True, 100, 200, "gpt-4o", "ok content", {}, "", 0)
         ],
-        models=[],
-        started_at="2026-07-11T10:00:00+00:00",
-        duration_s=1.0,
-    )
+        "models": [],
+        "started_at": "2026-07-11T10:00:00+00:00",
+        "duration_s": 1.0,
+    }
     base.update(over)
     return ScanResult(**base)
 

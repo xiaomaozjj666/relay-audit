@@ -250,7 +250,7 @@ class ReportHandler(SimpleHTTPRequestHandler):
         elif path.startswith("/html/"):
             name = _safe_path(path.removeprefix("/html/"))
             self._serve_html(name)
-        elif path.endswith(".html") or path.endswith(".htm"):
+        elif path.endswith((".html", ".htm")):
             name = Path(path).name
             self._serve_html(name)
         else:

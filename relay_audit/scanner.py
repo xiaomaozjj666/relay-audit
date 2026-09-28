@@ -258,7 +258,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 async with _sem:
                     return await client.list_models()
 
-            (status, raw_models, parsed, lat, raw_headers), ping = await asyncio.gather(
+            (status, raw_models, _parsed, _lat, raw_headers), ping = await asyncio.gather(
                 _list_models_task(), _ping_task()
             )
 

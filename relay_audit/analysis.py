@@ -333,16 +333,15 @@ def analyze_usage(usage: dict, result: ChatResult | None = None) -> list[Finding
     completion = usage.get("completion_tokens", 0) or 0
     total = usage.get("total_tokens", 0) or 0
 
-    if total and prompt is not None and completion is not None:
-        if total != prompt + completion:
-            fs.append(
-                Finding(
-                    Severity.LOW,
-                    "Token 计数不一致",
-                    f"total({total}) != prompt({prompt}) + completion({completion})",
-                    "quality",
-                )
+    if total and prompt is not None and completion is not None and total != prompt + completion:
+        fs.append(
+            Finding(
+                Severity.LOW,
+                "Token 计数不一致",
+                f"total({total}) != prompt({prompt}) + completion({completion})",
+                "quality",
             )
+        )
 
     if result and result.content and completion:
         content_len = len(result.content.encode("utf-8"))
@@ -357,16 +356,15 @@ def analyze_usage(usage: dict, result: ChatResult | None = None) -> list[Finding
                 )
             )
 
-    if result and prompt and len(result.content) < 50:
-        if prompt > 1000:
-            fs.append(
-                Finding(
-                    Severity.LOW,
-                    "prompt_tokens 偏高",
-                    f"简单请求报告 {prompt} tokens",
-                    "quality",
-                )
+    if result and prompt and len(result.content) < 50 and prompt > 1000:
+        fs.append(
+            Finding(
+                Severity.LOW,
+                "prompt_tokens 偏高",
+                f"简单请求报告 {prompt} tokens",
+                "quality",
             )
+        )
 
     if prompt and completion:
         ratio = completion / prompt
@@ -614,7 +612,7 @@ def analyze_stability(contents: list[str], lats: list[int]) -> list[Finding]:
                 f"最大 {max_lat}ms 是最小 {min_lat}ms 的 {max_lat / max(1, min_lat):.1f}x",
             )
         )
-    unique = set(c.strip() for c in contents if c.strip())
+    unique = {c.strip() for c in contents if c.strip()}
     if len(unique) > 1:
         fs.append(
             Finding(

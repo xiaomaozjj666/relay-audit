@@ -89,26 +89,31 @@ from relay_audit.scanner import (
 )
 
 __all__ = [
-    "__version__",
-    # models
-    "ChatResult",
-    "Finding",
-    "ModelInfo",
-    "ScanConfig",
-    "ScanResult",
-    "Severity",
     # patterns
     "CAT_CN",
     "DANGER_PATTERNS",
+    # scanner
+    "FUNCTION_CALLING_TOOLS",
     "KNOWN_FAMILIES",
+    "PROMPTS",
     "PROVIDER_HINTS",
     "PROXY_HEADERS",
     "REFUSAL_PATTERNS",
     "SAFETY_TEST_NAMES",
     "SEV_CN",
     "SUS_MODEL_PATTERNS",
-    "redact",
-    "short",
+    # client
+    "ApiClient",
+    # models
+    "ChatResult",
+    "Finding",
+    "ModelInfo",
+    "ModelsAuthError",
+    "ScanConfig",
+    "ScanResult",
+    "Severity",
+    "TestCase",
+    "__version__",
     # analysis
     "analyze_chat",
     "analyze_concurrent",
@@ -118,21 +123,16 @@ __all__ = [
     "analyze_models",
     "analyze_stability",
     "analyze_usage",
-    "encoding_consistency",
-    "mojibake_score",
-    # client
-    "ApiClient",
-    # scanner
-    "FUNCTION_CALLING_TOOLS",
-    "ModelsAuthError",
-    "PROMPTS",
-    "TestCase",
-    "fetch_models",
-    "run_scan",
     # reporter
     "compute_pass_rate",
+    "encoding_consistency",
+    "fetch_models",
     "generate_html",
+    "mojibake_score",
     "print_json",
     "print_terminal",
+    "redact",
+    "run_scan",
     "save_report",
+    "short",
 ]

@@ -5,7 +5,7 @@ import copy
 
 import pytest
 
-import relay_audit.scanner as scanner
+from relay_audit import scanner
 from relay_audit.models import ChatResult, ScanConfig, Severity
 from relay_audit.scanner import PROMPTS, fetch_models, fetch_models_with_status, run_scan
 
@@ -19,18 +19,18 @@ def _scan(cfg):
 
 
 def _cr(**over) -> ChatResult:
-    base = dict(
-        name="",
-        model_req="gpt-4o",
-        ok=True,
-        latency_ms=100,
-        status=200,
-        model_ret="gpt-4o",
-        content="ok",
-        usage={},
-        raw_id="",
-        created=0,
-    )
+    base = {
+        "name": "",
+        "model_req": "gpt-4o",
+        "ok": True,
+        "latency_ms": 100,
+        "status": 200,
+        "model_ret": "gpt-4o",
+        "content": "ok",
+        "usage": {},
+        "raw_id": "",
+        "created": 0,
+    }
     base.update(over)
     return ChatResult(**base)
 
@@ -137,7 +137,7 @@ def fake(monkeypatch):
 
 
 def _cfg(**over) -> ScanConfig:
-    base = dict(base_url="https://api.example.com", model="gpt-4o", samples=2)
+    base = {"base_url": "https://api.example.com", "model": "gpt-4o", "samples": 2}
     base.update(over)
     return ScanConfig(**base)
 

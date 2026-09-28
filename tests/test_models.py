@@ -12,18 +12,18 @@ from relay_audit.models import (
 
 
 def _result(**over) -> ChatResult:
-    base = dict(
-        name="t",
-        model_req="gpt-4o",
-        ok=True,
-        latency_ms=1000,
-        status=200,
-        model_ret="gpt-4o",
-        content="hello",
-        usage={"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
-        raw_id="id1",
-        created=1700000000,
-    )
+    base = {
+        "name": "t",
+        "model_req": "gpt-4o",
+        "ok": True,
+        "latency_ms": 1000,
+        "status": 200,
+        "model_ret": "gpt-4o",
+        "content": "hello",
+        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+        "raw_id": "id1",
+        "created": 1700000000,
+    }
     base.update(over)
     return ChatResult(**base)
 

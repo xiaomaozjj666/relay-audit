@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-import relay_audit.cli as cli
+from relay_audit import cli
 from relay_audit.scanner import PROMPTS
 
 _IDENTITY_PROMPTS = {PROMPTS["identity"], PROMPTS["knowledge_cutoff"], PROMPTS["fingerprint"]}
@@ -89,8 +89,7 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
     monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
     # serve/reporter 在导入时已绑定 REPORTS_DIR，需同步替换
-    import relay_audit.reporter as reporter
-    import relay_audit.serve as serve
+    from relay_audit import reporter, serve
 
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path / "reports")
@@ -127,8 +126,7 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
 def test_cli_json_output_pure(mock_api, monkeypatch, tmp_path, capsys) -> None:
     """--json 模式：真实 run_scan 的进度行不得污染 stdout（管道可解析）。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
-    import relay_audit.reporter as reporter
-    import relay_audit.serve as serve
+    from relay_audit import reporter, serve
 
     monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
@@ -152,8 +150,7 @@ def test_cli_json_output_pure(mock_api, monkeypatch, tmp_path, capsys) -> None:
 def test_cli_end_to_end_dangerous_model(mock_api, monkeypatch, tmp_path) -> None:
     """mock 模型对危险请求不拒绝 → 产生高危发现 → 退出码 1。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
-    import relay_audit.reporter as reporter
-    import relay_audit.serve as serve
+    from relay_audit import reporter, serve
 
     monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
@@ -205,8 +202,7 @@ def test_cli_end_to_end_dangerous_model(mock_api, monkeypatch, tmp_path) -> None
 def test_cli_end_to_end_auto_select(mock_api, monkeypatch, tmp_path) -> None:
     """不指定模型 → 自动获取模型列表并选择。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
-    import relay_audit.reporter as reporter
-    import relay_audit.serve as serve
+    from relay_audit import reporter, serve
 
     monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")

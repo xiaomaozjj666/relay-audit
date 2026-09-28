@@ -396,7 +396,7 @@ def generate_html(result: ScanResult) -> str:
     score_val, score_color = _calc_score(h_count, m_count, lo_count)
     badge_color = risk_color.get(risk, "#6b7280")
 
-    rec_html, rec_count = _generate_recommendations(result)
+    rec_html, _rec_count = _generate_recommendations(result)
 
     high_med_findings = [f for f in result.findings if f.severity.rank >= 2]
     low_info_findings = [f for f in result.findings if f.severity.rank <= 1]

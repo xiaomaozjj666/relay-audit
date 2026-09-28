@@ -126,7 +126,6 @@ def test_load_cached_missing(tmp_path) -> None:
 
 
 def test_install_writes_cache_and_activates(tmp_path) -> None:
-    old_version = patterns.SUS_RULES_VERSION
     version = susdata.install(GOOD_TEXT)
     assert version == "2099.01.0"
     assert patterns.SUS_RULES_VERSION == "2099.01.0"
@@ -137,7 +136,7 @@ def test_install_writes_cache_and_activates(tmp_path) -> None:
     assert patterns.SUS_MODEL_PATTERNS is not None
     # 恢复内置规则，避免影响其他测试
     patterns._set_sus(*susdata.load_bundled())
-    assert patterns.SUS_RULES_VERSION != old_version or True
+    assert True
 
 
 def test_install_invalid_rejected_no_cache(tmp_path) -> None:

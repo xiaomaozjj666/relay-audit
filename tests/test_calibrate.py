@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import relay_audit.calibrate as calibrate
+from relay_audit import calibrate
 from relay_audit.models import Finding, ScanConfig, ScanResult, Severity
 
 

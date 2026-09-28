@@ -89,7 +89,7 @@ class Handler(BaseHTTPRequestHandler):
     ban_after: int | None = None
     lock = threading.Lock()
 
-    def log_message(self, *args):  # noqa: N802
+    def log_message(self, *args):
         pass
 
     def _banned(self) -> bool:
@@ -111,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def do_GET(self):  # noqa: N802
+    def do_GET(self):
         if self._banned():
             return self._send(
                 401, {"error": {"message": "User account is not active", "code": "USER_INACTIVE"}}
@@ -123,7 +123,7 @@ class Handler(BaseHTTPRequestHandler):
             )
         return self._send(404, {"error": {"message": "not found"}})
 
-    def do_POST(self):  # noqa: N802
+    def do_POST(self):
         if self._banned():
             return self._send(
                 401, {"error": {"message": "User account is not active", "code": "USER_INACTIVE"}}

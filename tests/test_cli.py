@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-import relay_audit.cli as cli
+from relay_audit import cli
 from relay_audit.models import Finding, ScanConfig, ScanResult, Severity
 
 
@@ -54,7 +54,6 @@ def test_save_key_win32(monkeypatch, tmp_path) -> None:
 
     def fake_run(cmd, **kw):
         runs.append(cmd)
-        return None
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     monkeypatch.setattr(cli.os, "getlogin", lambda: "tester")
@@ -232,7 +231,7 @@ def test_build_config_samples_zero_and_str() -> None:
 def test_quick_help_text_accurate() -> None:
     """--quick 帮助文本与实际行为一致（只跳过部分安全测试）。"""
     ap = cli.build_parser()
-    quick = [a for a in ap._actions if a.dest == "quick"][0]
+    quick = next(a for a in ap._actions if a.dest == "quick")
     assert "高级" in quick.help
     assert "部分安全" in quick.help
 

@@ -8,11 +8,6 @@ updates:
       time: "03:00"
       timezone: Asia/Shanghai
     open-pull-requests-limit: 3
-    # ruff 0.16 扩充了默认规则集，存量代码有 60+ 处新告警（BLE001/PLR0402/C408 等），
-    # 需要专门一轮清理后才能跟进；先钉在 0.15
-    ignore:
-      - dependency-name: ruff
-        versions: [">=0.16"]
     groups:
       # httpx 是协议层，升级要重跑对 mock 服务与真实中转的扫描
       python-runtime:
