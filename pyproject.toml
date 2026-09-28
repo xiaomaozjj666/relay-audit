@@ -39,6 +39,9 @@ target-version = "py310"
 
 [tool.ruff.lint]
 extend-select = ["I", "UP", "B"]
+# ruff 0.16 起 TRY004 默认启用。规则/配置加载的非法输入刻意抛 ValueError
+# （CLI 与配置文件场景下比 TypeError 语义更贴切），不跟随"改抛 TypeError"的建议。
+ignore = ["TRY004"]
 
 # E402: __init__.py 需要先定义 REPORTS_DIR 再导入子模块（规避循环导入）；
 #       test_scanner.py 在文件中部引入 httpx/ApiClient 供用例复用。
