@@ -116,7 +116,11 @@ def test_scan_result_to_dict() -> None:
     ]
     findings = [
         Finding(
-            Severity.HIGH, "高危", "detail sk-abc1234567890123456", "identity", model_name="gpt-4o"
+            Severity.HIGH,
+            "高危",
+            "detail sk-abc12345678901234567",
+            "identity",
+            model_name="gpt-4o",
         )
     ]
     r = ScanResult(
@@ -169,3 +173,17 @@ def test_scan_result_to_dict() -> None:
     assert t2["ttft_ms"] is None  # 非流式无 TTFT
     assert "sk-abcdefghijklmnop123456" not in t2["error"]
     assert "[REDACTED]" in t2["error"]
+
+
+def test_tokens_per_second_poisoned_fields() -> None:
+    """H1 纵深：total_tokens/latency_ms 非数值时 tokens_per_second 返回 0.0 不抛。"""
+    assert _result(usage={"total_tokens": "999"}, latency_ms=100).tokens_per_second == 0.0
+    assert _result(usage={"total_tokens": 10}, latency_ms="100").tokens_per_second == 0.0
+    assert _result(usage={"total_tokens": None}, latency_ms=100).tokens_per_second == 0.0
+    assert _result(usage={"total_tokens": [10]}, latency_ms=100).tokens_per_second == 0.0
+    # 合法值语义不变
+    assert _result(usage={"total_tokens": 10}, latency_ms=1000).tokens_per_second == 10.0
+    # to_dict 全程不抛（JSON 输出安全）
+    r = _result(usage={"total_tokens": "999"})
+    d = ScanResult(ScanConfig(base_url="https://x"), [], [r], [], "", 1.0).to_dict()
+    assert d["tests"][0]["tokens_per_second"] == 0.0

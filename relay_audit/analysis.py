@@ -28,9 +28,17 @@ LONG_CONTEXT_NEEDLE = "07:42:19"
 
 
 def mojibake_score(text: str) -> float:
+    """乱码评分（0~1，>0.3 视为疑似乱码）。
+
+    权衡（L3）：字符级坏信号（替换符 U+FFFD、未配对代理、问号串、
+    扩展拉丁段）是强信号；"同段内容重复 3 次以上"只是弱信号——
+    正常内容（客服话术、模板条款、批量格式化输出）也会整段重复，
+    权重从 2 降到 0.5，避免正常重复内容单独把评分顶过告警阈值。
+    真乱码通常伴随替换符等强信号，降权不影响其检出。
+    """
     if not text.strip():
         return 0.0
-    bad = 0
+    bad = 0.0
     bad += len(re.findall(r"[�￾-]", text))
     cjk = len(re.findall(r"[一-鿿]", text))
     weird_latin = len(re.findall(r"[À-ɏ]{2,}", text))
@@ -38,7 +46,7 @@ def mojibake_score(text: str) -> float:
         bad += weird_latin
     bad += len(re.findall(r"\?{3,}", text)) * 2
     repeats = len(re.findall(r"(.{3,})\1{2,}", text))
-    bad += repeats * 2
+    bad += repeats * 0.5
     return min(1.0, bad / max(1, len(text)) * 5)
 
 
@@ -322,18 +330,53 @@ def analyze_headers(headers: dict[str, str]) -> list[Finding]:
 
 
 def analyze_usage(usage: dict, result: ChatResult | None = None) -> list[Finding]:
-    """分析 token 使用统计，检测计费异常"""
+    """分析 token 使用统计，检测计费异常。
+
+    毒数据防御（H1 纵深）：token 计数字段非 int（如恶意中转返回
+    字符串/列表/None）时按缺失处理跳过该项，并产出警告级发现
+    （伪造计费统计本身即可疑行为），绝不抛异常中断扫描。
+    """
     fs: list[Finding] = []
     if not usage:
         if result and result.ok:
             fs.append(Finding(Severity.LOW, "无 Token 统计", "响应未返回 usage 字段", "quality"))
         return fs
 
-    prompt = usage.get("prompt_tokens", 0) or 0
-    completion = usage.get("completion_tokens", 0) or 0
-    total = usage.get("total_tokens", 0) or 0
+    prompt_raw = usage.get("prompt_tokens")
+    completion_raw = usage.get("completion_tokens")
+    total_raw = usage.get("total_tokens")
 
-    if total and prompt is not None and completion is not None and total != prompt + completion:
+    poisoned = [
+        name
+        for name, val in (
+            ("prompt_tokens", prompt_raw),
+            ("completion_tokens", completion_raw),
+            ("total_tokens", total_raw),
+        )
+        if name in usage and not isinstance(val, int)
+    ]
+    if poisoned:
+        fs.append(
+            Finding(
+                Severity.LOW,
+                "Token 统计字段类型异常",
+                f"{', '.join(poisoned)} 不是整数（疑似伪造/投毒数据）",
+                "quality",
+                "中转站返回了非数值的 token 统计，计费可信度存疑",
+            )
+        )
+
+    # 各字段参与算术前做类型守卫：非 int 视为缺失，跳过依赖它的判定
+    prompt = prompt_raw if isinstance(prompt_raw, int) else None
+    completion = completion_raw if isinstance(completion_raw, int) else None
+    total = total_raw if isinstance(total_raw, int) else None
+
+    if (
+        total is not None
+        and prompt is not None
+        and completion is not None
+        and total != prompt + completion
+    ):
         fs.append(
             Finding(
                 Severity.LOW,

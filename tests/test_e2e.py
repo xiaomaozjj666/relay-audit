@@ -14,7 +14,11 @@ import pytest
 from relay_audit import cli
 from relay_audit.scanner import PROMPTS
 
-_IDENTITY_PROMPTS = {PROMPTS["identity"], PROMPTS["knowledge_cutoff"], PROMPTS["fingerprint"]}
+_IDENTITY_PROMPTS = {
+    PROMPTS["identity"],
+    PROMPTS["knowledge_cutoff"],
+    PROMPTS["fingerprint"],
+}
 
 
 class MockOpenAIHandler(BaseHTTPRequestHandler):
@@ -45,7 +49,14 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
             # （Prompt隔离 的首条消息是注入的 system 消息，含 canary 标记）
             if any(
                 k in content
-                for k in ("删除", "cookie", "AES", "reverse shell", "SQL注入", "SYS-CANARY-77")
+                for k in (
+                    "删除",
+                    "cookie",
+                    "AES",
+                    "reverse shell",
+                    "SQL注入",
+                    "SYS-CANARY-77",
+                )
             ):
                 text = "抱歉，我不能提供这个内容。"
             elif "唯一一条 ERROR" in content:
@@ -61,7 +72,11 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
                 "created": 1700000000,
                 "model": model,
                 "choices": [{"message": {"content": text}}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15,
+                },
             }
             body = json.dumps(resp).encode()
             self.send_response(200)
@@ -233,3 +248,81 @@ def test_models_listing_end_to_end(mock_api, monkeypatch, capsys) -> None:
     out = capsys.readouterr().out
     assert "共有 2 个模型" in out
     assert "gpt-4o" in out and "claude-3-opus" in out
+
+
+def test_cli_end_to_end_poisoned_usage(mock_api, monkeypatch, tmp_path) -> None:
+    """H1 纵深 e2e：恶意中转返回字符串 token 计数 → 全链路不崩且产出完整结果。
+
+    真实 HTTP 链路上 client 的 _sanitize_usage 把字符串数字安全化为 int，
+    下游 analysis/models 的类型守卫再兜一层——即使两层之间任何一处
+    语义变化，毒数据也不会炸掉扫描。
+    """
+    monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
+    from relay_audit import reporter, serve
+
+    monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path / "reports")
+
+    original = MockOpenAIHandler.do_POST
+
+    def poisoned_post(self):
+        ln = int(self.headers.get("Content-Length", 0) or 0)
+        req = json.loads(self.rfile.read(ln)) if ln else {}
+        content = (req.get("messages") or [{}])[0].get("content", "")
+        if any(
+            k in content
+            for k in (
+                "删除",
+                "cookie",
+                "AES",
+                "reverse shell",
+                "SQL注入",
+                "SYS-CANARY-77",
+            )
+        ):
+            text = "抱歉，我不能提供这个内容。"
+        elif "唯一一条 ERROR" in content:
+            text = "2026-08-29 07:42:19"
+        elif content in _IDENTITY_PROMPTS:
+            text = '{"model_self_id":"GPT-4o","provider":"OpenAI","canary":"RLY-42"}'
+        elif content.strip() == "ping":
+            text = "pong"
+        else:
+            text = '{"answer":"ok"}'
+        resp = {
+            "id": "chatcmpl-poison",
+            "created": 1700000000,
+            "model": req.get("model", "mock"),
+            "choices": [{"message": {"content": text}}],
+            # 毒 usage：字符串形态的 token 计数
+            "usage": {
+                "prompt_tokens": "10",
+                "completion_tokens": "5",
+                "total_tokens": "15",
+            },
+        }
+        body = json.dumps(resp).encode()
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.end_headers()
+        self.wfile.write(body)
+
+    MockOpenAIHandler.do_POST = poisoned_post
+    try:
+        ec, _, result = cli.execute_scan(
+            cli._build_config(
+                cli.build_parser().parse_args(["--base-url", mock_api, "--model", "gpt-4o"])
+            )
+        )
+    finally:
+        MockOpenAIHandler.do_POST = original
+
+    assert ec == 0
+    assert result is not None
+    assert len(result.results) > 1
+    # 上游安全化后计费分析正常进行（无类型异常告警、无崩溃）
+    assert not any(f.title == "Token 统计字段类型异常" for f in result.findings)
+    # JSON 结果仍正常持久化
+    scans = list((tmp_path / "reports").glob("scan_*.json"))
+    assert len(scans) >= 1

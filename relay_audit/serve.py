@@ -40,13 +40,21 @@ def _resolve_inside(name: str) -> Path | None:
 def persist_result(result: Any, base_url: str) -> str:
     """Save scan result as JSON to reports/ and return the file path."""
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # M4：秒级时间戳同秒多次持久化会静默覆盖，升级为毫秒级时间戳，
+    # 仍冲突时循环追加 _1/_2 序号直到不碰撞
+    now = datetime.now()
+    ts = now.strftime("%Y%m%d_%H%M%S")
+    msec = now.strftime("%f")[:3]
     # 仅保留安全字符（Windows 文件名不允许 ? & * 等）
     safe_url = re.sub(r"[^A-Za-z0-9._-]", "_", base_url)[:40]
     # 加入 URL 哈希，避免同前缀 URL 的文件名碰撞覆盖
     digest = hashlib.sha1(base_url.encode("utf-8")).hexdigest()[:8]
-    filename = f"scan_{ts}_{digest}_{safe_url}.json"
+    filename = f"scan_{ts}_{msec}_{digest}_{safe_url}.json"
     filepath = REPORTS_DIR / filename
+    n = 1
+    while filepath.exists():
+        filepath = REPORTS_DIR / f"scan_{ts}_{msec}_{digest}_{safe_url}_{n}.json"
+        n += 1
 
     data = {
         "timestamp": ts,
@@ -105,8 +113,10 @@ def list_json_reports() -> list[dict]:
             reports.append(
                 {
                     "type": "json",
-                    "file": f.name,
-                    "timestamp": _fmt_ts(data.get("timestamp", "")),
+                    # L4：file/timestamp 进入索引页 JS 的 innerHTML 拼接，
+                    # 下发前统一 HTML 转义（与 base_url 同策略），阻断怪名文件 XSS
+                    "file": htmlmod.escape(f.name),
+                    "timestamp": htmlmod.escape(_fmt_ts(data.get("timestamp", ""))),
                     "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(data.get("base_url", "") or ""),
                     "risk_level": data.get("summary", {}).get("risk_level", ""),
@@ -169,7 +179,8 @@ def list_html_reports() -> list[dict]:
             reports.append(
                 {
                     "type": "html",
-                    "file": f.name,
+                    # L4：file 下发前 HTML 转义，阻断怪名文件在索引页 innerHTML 的 XSS
+                    "file": htmlmod.escape(f.name),
                     "timestamp": ts_from_name,
                     "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(base_url),

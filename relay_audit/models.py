@@ -57,8 +57,10 @@ class ChatResult:
 
     @property
     def tokens_per_second(self) -> float:
-        if self.usage and self.latency_ms > 0:
-            total = self.usage.get("total_tokens", 0) or 0
+        """每秒 token 数。毒数据防御（H1 纵深）：total_tokens 或
+        latency_ms 非数值时返回 0.0，绝不抛异常。"""
+        total = self.usage.get("total_tokens") if self.usage else None
+        if isinstance(total, int) and isinstance(self.latency_ms, int) and self.latency_ms > 0:
             return total / (self.latency_ms / 1000)
         return 0.0
 

@@ -4,6 +4,7 @@ import http.client
 import json
 import re
 import threading
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -61,7 +62,11 @@ def test_persist_result_redacts_and_hashes(tmp_path, monkeypatch) -> None:
     r = _scan_result(
         findings=[
             Finding(
-                Severity.HIGH, "高危", "detail", "identity", reason="key sk-abcdefghijklmnop123456"
+                Severity.HIGH,
+                "高危",
+                "detail",
+                "identity",
+                reason="key sk-abcdefghijklmnop123456",
             )
         ],
         results=[
@@ -81,7 +86,8 @@ def test_persist_result_redacts_and_hashes(tmp_path, monkeypatch) -> None:
     )
     path = serve.persist_result(r, "https://api.example.com?x=1&y=2")
     name = str(path).replace("\\", "/").split("/")[-1]
-    assert re.match(r"scan_\d{8}_\d{6}_[0-9a-f]{8}_", name)
+    # M4：文件名含毫秒段（秒_毫秒_哈希_URL）
+    assert re.match(r"scan_\d{8}_\d{6}_\d{3}_[0-9a-f]{8}_", name)
     data = json.loads(Path(path).read_text(encoding="utf-8"))
     raw = json.dumps(data, ensure_ascii=False)
     assert "sk-abcdefghijklmnop123456" not in raw
@@ -98,6 +104,30 @@ def test_persist_result_distinct_urls(tmp_path, monkeypatch) -> None:
     serve.persist_result(r, "https://api.example.com/same-prefix-bbbb")
     files = list(tmp_path.glob("scan_*.json"))
     assert len(files) == 2  # 哈希避免碰撞覆盖
+
+
+class _FixedDatetime(datetime):
+    """固定时钟：模拟同毫秒内连续持久化（monkeypatch 替换 serve.datetime）。"""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2020, 1, 1, 12, 0, 0, 654321)
+
+
+def test_persist_result_same_instant_no_overwrite(monkeypatch, tmp_path) -> None:
+    """M4 回归：同 URL 同毫秒两次持久化 → 两个不同文件，内容各自完整。"""
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(serve, "datetime", _FixedDatetime)
+    r1 = _scan_result(findings=[Finding(Severity.HIGH, "标记A", "d")])
+    r2 = _scan_result(findings=[Finding(Severity.LOW, "标记B", "d")])
+    p1 = serve.persist_result(r1, "https://api.example.com")
+    p2 = serve.persist_result(r2, "https://api.example.com")
+    assert p1 != p2
+    assert Path(p1).exists() and Path(p2).exists()
+    d1 = json.loads(Path(p1).read_text(encoding="utf-8"))
+    d2 = json.loads(Path(p2).read_text(encoding="utf-8"))
+    assert d1["findings"][0]["title"] == "标记A"
+    assert d2["findings"][0]["title"] == "标记B"
 
 
 # ── 列表解析 ────────────────────────────────────────────────
@@ -176,6 +206,70 @@ def test_list_reports_merged_sorted(tmp_path, monkeypatch) -> None:
     assert reports[-1]["timestamp"] == "2026-07-10 10:00:00"
     assert [r["type"] for r in reports] == ["html", "json"]
     assert reports[0]["mtime"] > reports[1]["mtime"]
+
+
+# ── L4：索引页 XSS 转义 ────────────────────────────────────
+
+
+class _FakeReportFile:
+    """模拟怪名报告文件。
+
+    Windows 文件名不允许 < > " 等字符，无法在测试目录真实创建，
+    用替身对象模拟 Path 接口（name/stem/read_text/stat）。
+    """
+
+    def __init__(self, name: str, text: str) -> None:
+        self.name = name
+        self.stem = name.rsplit(".", 1)[0]
+        self._text = text
+
+    def read_text(self, encoding="utf-8", errors="ignore"):
+        return self._text
+
+    def stat(self):
+        class _Stat:
+            st_mtime = 1700000000.0
+
+        return _Stat()
+
+
+def test_list_html_reports_escapes_filename(monkeypatch) -> None:
+    """L4 回归：怪名文件（"><i>）下发的 file 字段已 HTML 转义。
+
+    索引页 JS 直接把 r.file 拼进 innerHTML 的 <a href="...">，
+    未转义时本地怪名文件可注入任意 HTML/脚本。
+    """
+    evil_name = 'relay_report_20260101_000000x"><i>.html'
+    fake_file = _FakeReportFile(
+        evil_name,
+        '<div class="url-text">https://x</div><span class="risk-level">低风险</span>',
+    )
+
+    class _Dir:
+        def is_dir(self):
+            return True
+
+        def glob(self, pattern):
+            return [fake_file] if pattern.startswith("relay_report_") else []
+
+    monkeypatch.setattr(serve, "REPORTS_DIR", _Dir())
+    reports = serve.list_html_reports()
+    assert len(reports) == 1
+    assert reports[0]["file"] == "relay_report_20260101_000000x&quot;&gt;&lt;i&gt;.html"
+    assert '"><i>' not in reports[0]["file"]
+
+
+def test_list_json_reports_escapes_injected_fields(tmp_path, monkeypatch) -> None:
+    """L4 回归：JSON 报告内容中的怪值（timestamp）下发前统一转义。"""
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path)
+    (tmp_path / "scan_20260101_000000_abc.json").write_text(
+        '{"timestamp":"<script>alert(1)</script>","base_url":"https://x","summary":{}}',
+        encoding="utf-8",
+    )
+    reports = serve.list_json_reports()
+    assert reports[0]["timestamp"] == "&lt;script&gt;alert(1)&lt;/script&gt;"
+    # 正常文件名转义后不变
+    assert reports[0]["file"] == "scan_20260101_000000_abc.json"
 
 
 # ── 缓存 ───────────────────────────────────────────────────

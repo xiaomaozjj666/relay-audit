@@ -52,8 +52,12 @@ def test_save_key_win32(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(cli.sys, "platform", "win32")
     runs = []
 
+    class FakeProc:
+        returncode = 0
+
     def fake_run(cmd, **kw):
         runs.append(cmd)
+        return FakeProc()
 
     monkeypatch.setattr(cli.subprocess, "run", fake_run)
     monkeypatch.setattr(cli.os, "getlogin", lambda: "tester")
@@ -61,6 +65,22 @@ def test_save_key_win32(monkeypatch, tmp_path) -> None:
     assert Path(kf).read_text(encoding="utf-8") == "sk-win"
     assert runs and runs[0][0] == "icacls"
     assert not os.path.exists(kf + ".tmp")  # 临时文件已原子替换
+
+
+def test_save_key_win32_icacls_nonzero_exit(monkeypatch, tmp_path, capsys) -> None:
+    """L1：icacls 退出码非 0（权限收紧失败）→ 显式告警，不再静默降级。"""
+    kf = str(tmp_path / "key")
+    monkeypatch.setattr(cli, "_key_path", lambda: kf)
+    monkeypatch.setattr(cli.sys, "platform", "win32")
+
+    class FakeProc:
+        returncode = 1
+
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: FakeProc())
+    monkeypatch.setattr(cli.os, "getlogin", lambda: "tester")
+    cli._save_key_to_file("sk-win")
+    assert Path(kf).read_text(encoding="utf-8") == "sk-win"
+    assert "无法设置密钥文件权限" in capsys.readouterr().err
 
 
 def test_save_key_win32_icacls_fails(monkeypatch, tmp_path, capsys) -> None:
@@ -391,6 +411,30 @@ def test_execute_scan_json_output(monkeypatch, capsys) -> None:
     assert "[OK]" not in out and "[i]" not in out  # 无进度/日志污染
 
 
+def test_execute_scan_json_report_path_stderr_and_no_browser(monkeypatch, capsys) -> None:
+    """M1：--json + HTML 报告 → 路径走 stderr、不弹浏览器，stdout 可整体 json.loads。"""
+
+    async def fake_run_scan(cfg):
+        return _scan_result(high=0)
+
+    opened = []
+
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr("relay_audit.serve.persist_result", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "report.html")
+    monkeypatch.setattr(cli.webbrowser, "open", lambda url: opened.append(url))
+    monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk"})
+
+    cfg = ScanConfig(base_url="https://x", model="m", json_output=True)
+    ec, path, _ = cli.execute_scan(cfg)
+    assert ec == 0 and path == "report.html"
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)  # stdout 必须可整体解析（relay-audit --json | jq .）
+    assert data["risk_level"] == "LOW"
+    assert "报告: report.html" in captured.err  # 路径信息改走 stderr
+    assert opened == []  # 未弹浏览器（自动化场景）
+
+
 def test_execute_scan_warnings(monkeypatch, capsys) -> None:
     async def fake_run_scan(cfg):
         return _scan_result(high=0)
@@ -715,7 +759,8 @@ def test_interactive_model_selection_by_name(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
     _mock_getpass(monkeypatch, ["sk-test"])
     monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["https://api.example.com", "claude", "n"])
+        "builtins.input",
+        _interactive_inputs(["https://api.example.com", "claude", "n"]),
     )
     assert cli.interactive() == 0
     out = capsys.readouterr().out
@@ -738,7 +783,8 @@ def test_interactive_model_selection_invalid(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli.webbrowser, "open", lambda url: None)
     _mock_getpass(monkeypatch, ["sk-test"])
     monkeypatch.setattr(
-        "builtins.input", _interactive_inputs(["https://api.example.com", "99,zzz", "n"])
+        "builtins.input",
+        _interactive_inputs(["https://api.example.com", "99,zzz", "n"]),
     )
     assert cli.interactive() == 0
     out = capsys.readouterr().out
@@ -1027,7 +1073,8 @@ def test_main_config_merge(monkeypatch, tmp_path) -> None:
 def test_main_config_cli_overrides(monkeypatch, tmp_path) -> None:
     cfg = tmp_path / "c.json"
     cfg.write_text(
-        json.dumps({"base_url": "https://cfg.example.com", "model": "cfg-model"}), encoding="utf-8"
+        json.dumps({"base_url": "https://cfg.example.com", "model": "cfg-model"}),
+        encoding="utf-8",
     )
     captured = {}
 
@@ -1044,7 +1091,8 @@ def test_main_config_merge_explicit_zero(monkeypatch, tmp_path) -> None:
     """显式传入 --samples 0 不应被配置文件覆盖（回归：0 == False 曾被误判为未设置）。"""
     cfg = tmp_path / "c.json"
     cfg.write_text(
-        json.dumps({"base_url": "https://cfg.example.com", "samples": 3}), encoding="utf-8"
+        json.dumps({"base_url": "https://cfg.example.com", "samples": 3}),
+        encoding="utf-8",
     )
     captured = {}
 

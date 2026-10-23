@@ -52,11 +52,14 @@ def _save_key_to_file(key: str) -> None:
         with open(kf_tmp, "w", encoding="utf-8") as f:
             f.write(key)
         try:
-            subprocess.run(
+            proc = subprocess.run(
                 ["icacls", kf_tmp, "/inheritance:r", "/grant:r", f"{os.getlogin()}:F"],
                 capture_output=True,
                 check=False,
             )
+            # icacls 失败静默降级会留下宽松权限的密钥文件，退出码非 0 时显式告警
+            if proc.returncode != 0:
+                print("  [!] 无法设置密钥文件权限", file=sys.stderr)
         except Exception:
             print("  [!] 无法设置密钥文件权限", file=sys.stderr)
         os.replace(kf_tmp, kf)
@@ -287,12 +290,16 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
             print(f"  [i] 终端输出异常: {e}")
 
     if report_path:
-        print(f"  报告: {report_path}")
-        try:
-            # as_uri() 要求绝对路径（相对路径在 Windows 上会抛 ValueError）
-            webbrowser.open(Path(report_path).resolve().as_uri())
-        except Exception:
-            print("  [!] 无法打开浏览器", file=sys.stderr)
+        if config.json_output:
+            # --json 模式：stdout 必须是纯 JSON（供 jq 等管道解析），路径信息走 stderr
+            print(f"  报告: {report_path}", file=sys.stderr)
+        else:
+            print(f"  报告: {report_path}")
+            try:
+                # as_uri() 要求绝对路径（相对路径在 Windows 上会抛 ValueError）
+                webbrowser.open(Path(report_path).resolve().as_uri())
+            except Exception:
+                print("  [!] 无法打开浏览器", file=sys.stderr)
 
     return 1 if result.high_count else 0, report_path, result
 
@@ -545,7 +552,10 @@ def build_parser() -> argparse.ArgumentParser:
 """,
     )
     ap.add_argument(
-        "--version", action="version", version=f"relay-audit {__version__}", help="显示版本号"
+        "--version",
+        action="version",
+        version=f"relay-audit {__version__}",
+        help="显示版本号",
     )
     ap.add_argument("--base-url", help="API 端点地址")
     ap.add_argument("--model", default="", help="检测模型名（不填则自动选择）")

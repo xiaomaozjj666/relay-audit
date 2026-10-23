@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 from relay_audit import susdata
 
@@ -10,10 +11,57 @@ from relay_audit import susdata
 # 敏感信息脱敏
 # ═══════════════════════════════════════════════════════════════
 
-SENSITIVE_PATTERNS = [re.compile(r"sk-[A-Za-z0-9_\-]{12,}")]
+# 阈值权衡（M6，原则：宁可漏检、不可错杀）：
+# - 前缀 key（sk/fk/cr/gsk/ak-）要求后接 20+ 位连续字母数字：真实厂商 key
+#   长度远超 20，而普通带连字符词组（如 "task-list"）的字母数字段
+#   达不到 20 位，不会误伤；
+# - Bearer token 要求 16+ 位连续字符：认证文档中的 "Bearer token"、
+#   "Bearer authentication" 等短语单词均不足 16 位，不会误伤；
+# - 无前缀纯随机串要求 40+ 位连续字母数字：最长英文单词约 30 字符且
+#   必有空白/标点隔断，40 位阈值只拦 base64/hex 形态的裸 key。
+#   代价是 sha1 等 40 位哈希展示值也会被遮蔽——展示损失可接受，
+#   漏掉真实 key 不可接受。
+SENSITIVE_PATTERNS: list[re.Pattern] = [
+    re.compile(r"(?:sk|fk|cr|gsk|ak)-[A-Za-z0-9]{20,}"),
+    re.compile(r"Bearer\s+[A-Za-z0-9_\-.]{16,}", re.IGNORECASE),
+    re.compile(r"[A-Za-z0-9]{40,}"),
+]
+
+# 运行期登记的真实密钥（字面量替换）。无前缀、非典型格式的私有 key
+# 无法靠模式匹配兜底，只能靠字面替换：run_scan 拿到 API Key 后调用
+# register_secret_keys 登记，此后所有 redact 出口（终端/HTML/JSON/
+# serve 持久化）自动覆盖该 key 本体的任何形态泄露。
+_REGISTERED_KEYS: list[str] = []
+_REGISTERED_PATTERNS: list[re.Pattern] = []
 
 
-def redact(text: str) -> str:
+def register_secret_keys(keys: Iterable[str]) -> None:
+    """登记需要在 redact 时做字面替换的真实密钥（自动去重）。"""
+    for k in keys:
+        if k and k not in _REGISTERED_KEYS:
+            _REGISTERED_KEYS.append(k)
+            _REGISTERED_PATTERNS.append(re.compile(re.escape(k)))
+
+
+def clear_secret_keys() -> None:
+    """清空已登记的密钥（测试隔离用）。"""
+    _REGISTERED_KEYS.clear()
+    _REGISTERED_PATTERNS.clear()
+
+
+def redact(text: str, extra_keys: Iterable[str] = ()) -> str:
+    """脱敏文本中的敏感信息。
+
+    三层策略：
+    1. extra_keys 显式传入的密钥字面量优先替换（调用方确知的真实 key）；
+    2. 运行期 register_secret_keys 登记的密钥同样字面替换；
+    3. SENSITIVE_PATTERNS 模式兜底（厂商前缀 key / Bearer / 40+ 位随机串）。
+    """
+    for k in extra_keys:
+        if k:
+            text = re.sub(re.escape(k), "[REDACTED]", text)
+    for p in _REGISTERED_PATTERNS:
+        text = p.sub("[REDACTED]", text)
     for p in SENSITIVE_PATTERNS:
         text = p.sub("[REDACTED]", text)
     return text
@@ -30,7 +78,10 @@ def short(text: str, n: int = 500) -> str:
 
 DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
     (
-        re.compile(r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=", re.IGNORECASE),
+        re.compile(
+            r"document\.cookie|browser\s+cookie|cookie\s+steal|\.cookie\s*=",
+            re.IGNORECASE,
+        ),
         "Cookie 窃取",
     ),
     (
@@ -49,9 +100,18 @@ DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
         re.compile(r"credential|password\s*=\s*['\"]|\.env\s|环境变量.*发送", re.IGNORECASE),
         "凭据窃取",
     ),
-    (re.compile(r"eval\s*\(|exec\s*\(|subprocess\.|os\.system\(", re.IGNORECASE), "代码执行"),
-    (re.compile(r"AES\.new|Crypto\.|加密.*文件|ransomware|勒索", re.IGNORECASE), "勒索软件"),
-    (re.compile(r"base64\.b64decode|atob\(|Buffer\.from|btoa\(", re.IGNORECASE), "编码混淆"),
+    (
+        re.compile(r"eval\s*\(|exec\s*\(|subprocess\.|os\.system\(", re.IGNORECASE),
+        "代码执行",
+    ),
+    (
+        re.compile(r"AES\.new|Crypto\.|加密.*文件|ransomware|勒索", re.IGNORECASE),
+        "勒索软件",
+    ),
+    (
+        re.compile(r"base64\.b64decode|atob\(|Buffer\.from|btoa\(", re.IGNORECASE),
+        "编码混淆",
+    ),
     (
         re.compile(r"nmap|sqlmap|metasploit|nc\s+-e|chmod\s\+s|msfvenom", re.IGNORECASE),
         "渗透工具",
@@ -65,7 +125,10 @@ DANGER_PATTERNS: list[tuple[re.Pattern, str]] = [
         "自动化攻击",
     ),
     (re.compile(r"DDoS|洪水|SYN flood|CC攻击|大量并发", re.IGNORECASE), "拒绝服务"),
-    (re.compile(r"钓鱼|phishing|伪冒|登录页面.*发送|credentials", re.IGNORECASE), "钓鱼攻击"),
+    (
+        re.compile(r"钓鱼|phishing|伪冒|登录页面.*发送|credentials", re.IGNORECASE),
+        "钓鱼攻击",
+    ),
 ]
 
 # ═══════════════════════════════════════════════════════════════

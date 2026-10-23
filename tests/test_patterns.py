@@ -37,13 +37,13 @@ def _pin_bundled_sus_rules(tmp_path, monkeypatch):
 def test_redact() -> None:
     assert redact("key sk-abcdefghijklmnopqrstuvwxyz123 end") == "key [REDACTED] end"
     assert redact("no secrets here") == "no secrets here"
-    # 短于 12 位的 sk- 片段不脱敏（避免误伤）
+    # 短于 20 位的 sk- 片段不脱敏（避免误伤，阈值原则：宁可漏不可错杀）
     assert redact("sk-abc") == "sk-abc"
 
 
 def test_short() -> None:
     assert short("hello") == "hello"
-    assert short("a" * 100, 20) == "a" * 20 + "..."
+    assert short("word " * 30, 20) == ("word " * 30)[:20] + "..."
     # 换行/回车被转义为字面 \\n
     assert short("a\nb") == "a\\nb"
     # 敏感内容先脱敏
@@ -95,13 +95,25 @@ def test_sus_model_patterns_2026_08_reality() -> None:
     """阈值对齐 2026-08 真实版本（校准回归）。"""
     # GPT：5.6 封顶，5.6 全系放行，5.7+/gpt-6 可疑
     gpt = SUS_MODEL_PATTERNS[0][0]
-    for mid in ("gpt-5.2", "gpt-5.5", "gpt-5.6", "gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"):
+    for mid in (
+        "gpt-5.2",
+        "gpt-5.5",
+        "gpt-5.6",
+        "gpt-5.6-luna",
+        "gpt-5.6-sol",
+        "gpt-5.6-terra",
+    ):
         assert not gpt.search(mid), mid
     assert gpt.search("gpt-5.7") and gpt.search("gpt-6")
 
     # Claude：Opus 5 已发布（4.8 为上一代 4.x 顶配）
     claude = SUS_MODEL_PATTERNS[1][0]
-    for mid in ("claude-opus-5", "claude-opus-5-2", "claude-opus-4-8", "claude-opus-4-1"):
+    for mid in (
+        "claude-opus-5",
+        "claude-opus-5-2",
+        "claude-opus-4-8",
+        "claude-opus-4-1",
+    ):
         assert not claude.search(mid), mid
     assert claude.search("claude-opus-6") and claude.search("claude-opus-4-9")
 
@@ -169,5 +181,78 @@ def test_cn_maps() -> None:
 
 
 def test_sensitive_patterns() -> None:
-    assert len(SENSITIVE_PATTERNS) == 1
+    assert len(SENSITIVE_PATTERNS) == 3
     assert SENSITIVE_PATTERNS[0].search("sk-abcdefghijklmnop123456")
+    assert SENSITIVE_PATTERNS[1].search("Bearer abcdefghijklmnop")
+    assert SENSITIVE_PATTERNS[2].search("A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2")
+
+
+# ── M6：脱敏覆盖面回归 ─────────────────────────────────────
+
+
+def test_redact_vendor_prefixes() -> None:
+    """M6 回归：fk-/cr-/gsk-/ak- 前缀 key 此前原样通过（README 承诺与实现脱节）。"""
+    for prefix in ("fk", "cr", "gsk", "ak"):
+        key = f"{prefix}-{('abcdefghij0123456789' * 2)}"  # 40 位随机形态
+        out = redact(f"key {key} end")
+        assert prefix not in out, prefix
+        assert "[REDACTED]" in out
+
+
+def test_redact_bearer_tokens() -> None:
+    """M6 回归：Bearer 行脱敏（大小写不敏感）；文档短语（单词 <16 位）不误伤。"""
+    assert redact("Authorization: Bearer abcdef1234567890abcd") == "Authorization: [REDACTED]"
+    assert redact("bearer ABCDEF1234567890") == "[REDACTED]"
+    # 常见认证文档短语不误伤
+    assert redact("Bearer token authentication is required") == (
+        "Bearer token authentication is required"
+    )
+
+
+def test_redact_long_random_string_threshold() -> None:
+    """M6 回归：无前缀 40+ 位连续字母数字（base64/hex 裸 key）拦；
+    39 位以内不拦——阈值权衡：宁可漏不可错杀英文单词。"""
+    long_key = "A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5p6Q7r8S9t0U1v2"  # 44 位
+    assert len(long_key) == 44
+    assert "[REDACTED]" in redact(f"leak: {long_key} !")
+    s39 = ("ab12cd34" * 5)[:39]
+    assert len(s39) == 39
+    assert redact(f"x {s39} y") == f"x {s39} y"
+
+
+def test_redact_normal_text_not_affected() -> None:
+    """M6 回归：正常英文句子、模型名、URL 不被新规则误伤。"""
+    text = (
+        "The quick brown fox jumps over the lazy dog. "
+        "Model gpt-4o and claude-sonnet-4-5 at api.example.com/v1/models are fine."
+    )
+    assert redact(text) == text
+
+
+def test_redact_extra_keys_literal_replacement() -> None:
+    """M6 回归：调用方显式传入的真实 key 字面替换（含正则特殊字符）。"""
+    key = "Kx9+secret/key_2026!"
+    text = f"leaked {key} in error"
+    assert redact(text, extra_keys=[key]) == "leaked [REDACTED] in error"
+    # 不传 extra_keys 时该私有格式 key（无前缀、<40 位）模式匹配不到
+    assert redact(text) == text
+    # 空字符串 key 忽略
+    assert redact("plain", extra_keys=[""]) == "plain"
+
+
+def test_register_secret_keys() -> None:
+    """M6 接入机制：登记的真实密钥在全局 redact 出口自动字面替换。"""
+    from relay_audit import patterns
+
+    key = "private-key_abc123"
+    text = f"echo {key}"
+    try:
+        patterns.register_secret_keys([key])
+        assert redact(text) == "echo [REDACTED]"
+        # 重复登记幂等
+        patterns.register_secret_keys([key])
+        assert redact(text) == "echo [REDACTED]"
+    finally:
+        patterns.clear_secret_keys()
+    # 清空后不再字面替换
+    assert redact(text) == "echo private-key_abc123"

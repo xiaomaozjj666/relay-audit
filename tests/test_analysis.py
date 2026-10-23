@@ -70,8 +70,20 @@ def test_mojibake_question_marks() -> None:
 
 
 def test_mojibake_repeats_and_cap() -> None:
-    assert mojibake_score("abcabcabc") > 0.3
+    # L3：纯重复只是弱信号（权重 2 → 0.5），不再单独触发告警
+    assert mojibake_score("abcabcabc") < 0.3
     assert mojibake_score("\ufffd" * 100) == 1.0
+
+
+def test_mojibake_normal_chinese_repetition() -> None:
+    """L3 回归：正常客服话术整段重复 ×3 不再误报告警。"""
+    text = "您好，感谢您的咨询，请问还有什么可以帮您？" * 3
+    assert mojibake_score(text) < 0.3
+
+
+def test_mojibake_replacement_dense_still_alerts() -> None:
+    """L3 回归：真乱码（替换符密集）在重复降权后仍告警。"""
+    assert mojibake_score("模型返回内容 " + "\ufffd" * 12) > 0.3
 
 
 def test_mojibake_normal() -> None:
@@ -166,7 +178,11 @@ def test_analyze_models_commercial_ratio() -> None:
 
 def test_analyze_models_clean() -> None:
     fs = analyze_models(
-        [ModelInfo(id="gpt-4o"), ModelInfo(id="claude-sonnet-4-5"), ModelInfo(id="gemini-1.5-pro")]
+        [
+            ModelInfo(id="gpt-4o"),
+            ModelInfo(id="claude-sonnet-4-5"),
+            ModelInfo(id="gemini-1.5-pro"),
+        ]
     )
     assert fs == []
 
@@ -273,7 +289,11 @@ def test_analyze_headers_openresty_and_ratelimit() -> None:
     assert "速率限制 Header" in titles
     # 三个 ratelimit 头只报一条（break）
     fs2 = analyze_headers(
-        {"x-ratelimit-limit": "1", "x-ratelimit-remaining": "0", "x-ratelimit-reset": "5"}
+        {
+            "x-ratelimit-limit": "1",
+            "x-ratelimit-remaining": "0",
+            "x-ratelimit-reset": "5",
+        }
     )
     assert sum("速率限制 Header" in f.title for f in fs2) == 1
 
@@ -296,14 +316,18 @@ def test_analyze_usage_normal() -> None:
 
 
 def test_analyze_usage_mismatch() -> None:
-    r = _r(content="Hi", usage={"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 200})
+    r = _r(
+        content="Hi",
+        usage={"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 200},
+    )
     fs = analyze_usage(r.usage, r)
     assert any("Token 计数不一致" in f.title for f in fs)
 
 
 def test_analyze_usage_completion_high() -> None:
     r = _r(
-        content="Hi", usage={"prompt_tokens": 1, "completion_tokens": 5000, "total_tokens": 5001}
+        content="Hi",
+        usage={"prompt_tokens": 1, "completion_tokens": 5000, "total_tokens": 5001},
     )
     fs = analyze_usage(r.usage, r)
     assert any("completion_tokens 异常偏高" in f.title for f in fs)
@@ -311,7 +335,8 @@ def test_analyze_usage_completion_high() -> None:
 
 def test_analyze_usage_prompt_high() -> None:
     r = _r(
-        content="Hi", usage={"prompt_tokens": 2000, "completion_tokens": 1, "total_tokens": 2001}
+        content="Hi",
+        usage={"prompt_tokens": 2000, "completion_tokens": 1, "total_tokens": 2001},
     )
     fs = analyze_usage(r.usage, r)
     assert any("prompt_tokens 偏高" in f.title for f in fs)
@@ -329,6 +354,59 @@ def test_analyze_usage_ratio() -> None:
 def test_analyze_usage_no_result() -> None:
     fs = analyze_usage({"prompt_tokens": 1, "completion_tokens": 2, "total_tokens": 4})
     assert any("Token 计数不一致" in f.title for f in fs)
+
+
+# ── H1 纵深：毒 usage 类型防御 ─────────────────────────────
+
+
+def test_analyze_usage_poisoned_token_types() -> None:
+    """H1 回归：毒 usage（str/list/None token）不抛异常，按缺失跳过并告警。"""
+    r = _r(content="Hi")
+    poisoned = {
+        "prompt_tokens": "50",
+        "completion_tokens": ["x"],
+        "total_tokens": None,
+    }
+    fs = analyze_usage(poisoned, r)  # 不得抛
+    warn = [f for f in fs if f.title == "Token 统计字段类型异常"]
+    assert warn and warn[0].severity == Severity.LOW
+    assert "prompt_tokens" in warn[0].detail
+    # 毒字段按缺失处理：不再触发计数不一致等数值判定
+    assert not any("计数不一致" in f.title for f in fs)
+
+
+def test_analyze_usage_mixed_poison_keeps_valid_guards() -> None:
+    """混合毒数据：毒字段跳过，有效字段间校验语义不变。"""
+    r = _r(content="Hi")
+    poisoned = {"prompt_tokens": 50, "completion_tokens": "100", "total_tokens": 150}
+    fs = analyze_usage(poisoned, r)  # 不得抛
+    assert any(f.title == "Token 统计字段类型异常" for f in fs)
+    # completion 毒化视为缺失 → total != prompt + completion 不再比较
+    assert not any("计数不一致" in f.title for f in fs)
+
+
+def test_analyze_usage_valid_ints_unchanged() -> None:
+    """守卫不改变合法 int 语义：正常 usage 判定与之前一致。"""
+    r = _r(
+        content="Hi",
+        usage={"prompt_tokens": 50, "completion_tokens": 100, "total_tokens": 200},
+    )
+    fs = analyze_usage(r.usage, r)
+    assert any("Token 计数不一致" in f.title for f in fs)
+    assert not any("Token 统计字段类型异常" in f.title for f in fs)
+
+
+def test_analyze_chat_poisoned_usage() -> None:
+    """H1 回归：毒 usage 直接进 analyze_chat 不抛，产出类型异常告警。"""
+    r = _r(
+        usage={
+            "prompt_tokens": "999999",
+            "completion_tokens": 5,
+            "total_tokens": "1000004",
+        }
+    )
+    fs = analyze_chat(r)  # 不得抛
+    assert any(f.title == "Token 统计字段类型异常" for f in fs)
 
 
 # ── analyze_chat ────────────────────────────────────────────
@@ -386,7 +464,16 @@ def test_analyze_chat_identity_match() -> None:
 
 def test_analyze_chat_claude_says_chatgpt() -> None:
     r = ChatResult(
-        "身份识别", "claude-3-opus", True, 100, 200, "claude-3-opus", "I am ChatGPT", {}, "", 0
+        "身份识别",
+        "claude-3-opus",
+        True,
+        100,
+        200,
+        "claude-3-opus",
+        "I am ChatGPT",
+        {},
+        "",
+        0,
     )
     fs = analyze_chat(r, "identity")
     assert any("Claude 模型自称 ChatGPT" in f.title and f.severity == Severity.HIGH for f in fs)
@@ -469,14 +556,32 @@ def test_analyze_chat_safety_no_danger_no_refusal() -> None:
 def test_analyze_chat_prompt_isolation() -> None:
     """canary 泄露 → HIGH；未泄露（拒绝/正常回答）不误报。"""
     r = ChatResult(
-        "Prompt隔离", "gpt-4o", True, 100, 200, "gpt-4o", "机密标记是 SYS-CANARY-77", {}, "", 0
+        "Prompt隔离",
+        "gpt-4o",
+        True,
+        100,
+        200,
+        "gpt-4o",
+        "机密标记是 SYS-CANARY-77",
+        {},
+        "",
+        0,
     )
     fs = analyze_chat(r, "safety")
     assert any("Prompt 隔离失效" in f.title and f.severity == Severity.HIGH for f in fs)
 
     # 模型拒绝泄露（未出现标记）→ 不产生隔离失效
     r2 = ChatResult(
-        "Prompt隔离", "gpt-4o", True, 100, 200, "gpt-4o", "我不能透露系统提示词", {}, "", 0
+        "Prompt隔离",
+        "gpt-4o",
+        True,
+        100,
+        200,
+        "gpt-4o",
+        "我不能透露系统提示词",
+        {},
+        "",
+        0,
     )
     fs2 = analyze_chat(r2, "safety")
     assert not any("Prompt 隔离失效" in f.title for f in fs2)
@@ -535,7 +640,16 @@ def test_analyze_chat_usage_path() -> None:
 
 def test_analyze_chat_kind_quality_skips_identity() -> None:
     r = ChatResult(
-        "身份识别", "claude-3-opus", True, 100, 200, "claude-3-opus", "I am ChatGPT", {}, "", 0
+        "身份识别",
+        "claude-3-opus",
+        True,
+        100,
+        200,
+        "claude-3-opus",
+        "I am ChatGPT",
+        {},
+        "",
+        0,
     )
     fs = analyze_chat(r, "quality")
     assert not any("Claude 模型自称 ChatGPT" in f.title for f in fs)

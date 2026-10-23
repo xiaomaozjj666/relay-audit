@@ -6,8 +6,23 @@ import copy
 import pytest
 
 from relay_audit import scanner
-from relay_audit.models import ChatResult, ScanConfig, Severity
-from relay_audit.scanner import PROMPTS, fetch_models, fetch_models_with_status, run_scan
+from relay_audit.models import ChatResult, ScanConfig, ScanResult, Severity
+from relay_audit.scanner import (
+    PROMPTS,
+    fetch_models,
+    fetch_models_with_status,
+    run_scan,
+)
+
+
+@pytest.fixture(autouse=True)
+def _clear_registered_secret_keys():
+    """隔离全局密钥登记（M6 redact 接入），避免测试间顺序耦合。"""
+    from relay_audit import patterns
+
+    patterns.clear_secret_keys()
+    yield
+    patterns.clear_secret_keys()
 
 
 def _run(coro):
@@ -86,7 +101,12 @@ class FakeClient:
     ):
         content = messages[0]["content"] if messages else ""
         self.chat_calls.append(
-            {"model": model, "content": content, "response_format": response_format, "tools": tools}
+            {
+                "model": model,
+                "content": content,
+                "response_format": response_format,
+                "tools": tools,
+            }
         )
         if content in self.raise_for:
             raise self.raise_for[content]
@@ -318,7 +338,11 @@ def test_run_scan_stability_exception(fake) -> None:
 
 
 def test_run_scan_burst_partial_fail(fake) -> None:
-    fake.burst_results = [_cr(ok=True, latency_ms=100), _cr(ok=False, status=500), _cr(ok=True)]
+    fake.burst_results = [
+        _cr(ok=True, latency_ms=100),
+        _cr(ok=False, status=500),
+        _cr(ok=True),
+    ]
     result = _scan(_cfg(samples=1))
     assert any("并发测试部分失败" in f.title for f in result.findings)
 
@@ -367,6 +391,53 @@ def test_run_scan_single_sample_no_diagnostics_burst(fake) -> None:
     assert "突发_1" in names and "突发_2" in names
 
 
+# ── H1 纵深：毒 usage 不炸扫描 ─────────────────────────────
+
+
+def test_run_scan_poisoned_usage_str_tokens(fake) -> None:
+    """H1 回归：毒 usage（str token）跑完整 run_scan 产出 ScanResult 且有警告 finding。"""
+    fake.default_result = _cr(
+        usage={"prompt_tokens": "50", "completion_tokens": "100", "total_tokens": "150"}
+    )
+    result = _scan(_cfg())
+    assert isinstance(result, ScanResult)
+    warn = [f for f in result.findings if f.title == "Token 统计字段类型异常"]
+    assert warn and warn[0].severity == Severity.LOW
+    # 其余检测全部继续执行
+    assert len(result.results) > 5
+
+
+def test_run_scan_analysis_crash_becomes_finding(fake, monkeypatch) -> None:
+    """H1 回归：单项分析崩溃转为警告级 finding，扫描继续不中断。"""
+
+    def boom(result, kind="quality"):
+        raise RuntimeError("analysis poison")
+
+    monkeypatch.setattr(scanner, "analyze_chat", boom)
+    result = _scan(_cfg())
+    crash = [f for f in result.findings if f.title.startswith("单项分析失败")]
+    assert crash and crash[0].severity == Severity.LOW
+    # 扫描继续：全部测试结果仍然落袋
+    assert len(result.results) >= 10
+
+
+def test_run_scan_registers_api_key_for_redaction(fake, monkeypatch) -> None:
+    """M6 接入点回归：run_scan 登记真实 Key → 报告 HTML 中该 key 字面替换。
+
+    无前缀、非典型格式的私有 key 无法靠模式匹配兜底，
+    只能靠 scanner 在扫描上下文中登记、redact 出口字面替换。
+    """
+    from relay_audit.reporter import generate_html
+
+    private_key = "Kx9-private-key_2026!"
+    monkeypatch.setenv("RELAY_API_KEY", private_key)
+    fake.default_result = _cr(content=f"leaked {private_key} here")
+    result = _scan(_cfg())
+    html = generate_html(result)
+    assert private_key not in html
+    assert "[REDACTED]" in html
+
+
 # ── fetch_models ────────────────────────────────────────────
 
 
@@ -376,7 +447,13 @@ def test_fetch_models(fake) -> None:
 
 
 def test_fetch_models_skips_non_dict(fake) -> None:
-    fake.list_models_result = (200, ["gpt-4o", {"id": "claude-3"}, {"id": 42}], {}, 0.01, {})
+    fake.list_models_result = (
+        200,
+        ["gpt-4o", {"id": "claude-3"}, {"id": 42}],
+        {},
+        0.01,
+        {},
+    )
     ids = _run(fetch_models("https://x", "sk-test"))
     assert ids == ["claude-3"]
 

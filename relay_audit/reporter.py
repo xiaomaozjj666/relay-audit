@@ -121,6 +121,7 @@ def _print_plain(result: ScanResult) -> None:
 def _print_rich(result: ScanResult) -> None:
     from rich import box
     from rich.console import Console
+    from rich.markup import escape
     from rich.panel import Panel
     from rich.table import Table
 
@@ -139,8 +140,10 @@ def _print_rich(result: ScanResult) -> None:
     console.print()
     console.print(
         Panel(
-            f"[bold]{result.config.base_url}[/]\n"
-            f"模型: [cyan]{result.config.model}[/]  |  "
+            # M7：远端可控文本（base_url/模型名）统一 escape，
+            # 防止 rich markup 注入（MarkupError 崩掉终端报告）
+            f"[bold]{escape(result.config.base_url)}[/]\n"
+            f"模型: [cyan]{escape(result.config.model)}[/]  |  "
             f"[{risk_st}]风险 {result.risk_level}[/]  |  "
             f"耗时 {result.duration_s:.0f}s  |  测试 {len(result.results)} 项",
             title="[bold]Relay Audit[/]",
@@ -179,12 +182,12 @@ def _print_rich(result: ScanResult) -> None:
             sev = SEV_CN.get(f.severity.value, f.severity.value)
             cat = CAT_CN.get(f.category, f.category)
             detail = short(f.detail, 60)
-            reason = f"\n[dim italic]{f.reason}[/]" if f.reason else ""
+            reason = f"\n[dim italic]{escape(f.reason)}[/]" if f.reason else ""
             t.add_row(
                 f"[{c}]{sev}[/]",
                 f"[dim]{cat}[/]",
-                f"{f.title}{reason}",
-                f"[dim]{detail}[/]",
+                f"{escape(f.title)}{reason}",
+                f"[dim]{escape(detail)}[/]",
             )
         console.print(t)
     else:
@@ -213,12 +216,12 @@ def _print_rich(result: ScanResult) -> None:
             lat_s += f"\n首字 {r.ttft_ms}ms"
         st = " [dim][流][/]" if r.streaming else ""
         rt.add_row(
-            f"{r.name}{st}",
+            f"{escape(r.name)}{st}",
             ok_cls,
             lat_s,
             tps_s,
-            f"[dim]{r.model_req}[/]",
-            f"[dim]{r.model_ret or '-'}[/]",
+            f"[dim]{escape(r.model_req)}[/]",
+            f"[dim]{escape(r.model_ret or '-')}[/]",
         )
     console.print(rt)
     probe_s = f"  |  探针 {result.probe_suite}" if result.probe_suite else ""
@@ -243,6 +246,7 @@ def print_model_comparison(rows: list[dict[str, Any]]) -> None:
     try:
         from rich import box
         from rich.console import Console
+        from rich.markup import escape
         from rich.table import Table
 
         table = Table(box=box.ROUNDED, title="多模型对比", title_style="bold")
@@ -257,7 +261,7 @@ def print_model_comparison(rows: list[dict[str, Any]]) -> None:
         for r in rows:
             style = risk_style.get(r["risk"], "bold white")
             table.add_row(
-                r["model"],
+                escape(r["model"]),
                 f"[{style}]{r['risk']}[/]",
                 str(r["high"]),
                 str(r["med"]),
@@ -818,9 +822,16 @@ details[open] summary::before {{ transform: rotate(90deg) }}
 
 def save_report(result: ScanResult, output_path: str | None = None) -> str:
     if output_path is None or output_path == "auto":
-        output_path = os.path.join(
-            _reports_dir(), f"relay_report_{dt.datetime.now():%Y%m%d_%H%M%S}.html"
-        )
+        # M4：秒级时间戳在同秒多次保存时会静默覆盖，升级为
+        # 毫秒级时间戳，仍冲突时循环追加 _1/_2 序号直到不碰撞
+        now = dt.datetime.now()
+        msec = now.strftime("%f")[:3]
+        base = f"relay_report_{now:%Y%m%d_%H%M%S}_{msec}"
+        output_path = os.path.join(_reports_dir(), f"{base}.html")
+        n = 1
+        while os.path.exists(output_path):
+            output_path = os.path.join(_reports_dir(), f"{base}_{n}.html")
+            n += 1
     html = generate_html(result)
     out_dir = os.path.dirname(output_path)
     if out_dir:
@@ -831,19 +842,35 @@ def save_report(result: ScanResult, output_path: str | None = None) -> str:
 
 
 def _clean_old_reports(dir_path: str, days: int = REPORT_TTL_DAYS) -> None:
-    """删除超过 days 天的旧报告；days <= 0 表示永不清理。"""
+    """删除超过 days 天的旧报告；days <= 0 表示永不清理。
+
+    M5：单个文件删除/取属性失败（Windows 文件占用等）只跳过该文件，
+    不中断其余文件的清理；目录级失败（无法列举）才整体放弃。
+    """
     if days <= 0:
         return
     cutoff = dt.datetime.now().timestamp() - days * 86400
     try:
-        for f in os.listdir(dir_path):
-            if (f.startswith("relay_report_") and f.endswith(".html")) or (
-                f.startswith("scan_") and f.endswith(".json")
-            ):
-                fp = os.path.join(dir_path, f)
-                if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
-                    os.remove(fp)
+        entries = os.listdir(dir_path)
     except Exception:
         import sys
 
         print("  [!] 清理旧报告失败", file=sys.stderr)
+        return
+    failures: list[str] = []
+    for name in entries:
+        if not (
+            (name.startswith("relay_report_") and name.endswith(".html"))
+            or (name.startswith("scan_") and name.endswith(".json"))
+        ):
+            continue
+        fp = os.path.join(dir_path, name)
+        try:
+            if os.path.isfile(fp) and os.path.getmtime(fp) < cutoff:
+                os.remove(fp)
+        except OSError:
+            failures.append(name)
+    if failures:
+        import sys
+
+        print(f"  [!] {len(failures)} 个旧报告清理失败（可能被占用）", file=sys.stderr)

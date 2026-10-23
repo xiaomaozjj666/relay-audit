@@ -340,13 +340,13 @@ def test_chat_stream_non_2xx() -> None:
 
 
 def test_chat_stream_timeout() -> None:
-    """MockTransport 不强制超时，用 stub stream 直接触发 TimeoutError 分支。"""
+    """MockTransport 不强制超时，用 stub stream 直接触发 TimeoutException 分支。"""
 
     class TimeoutStreamResp:
         status_code = 200
 
         async def aiter_lines(self):
-            raise asyncio.TimeoutError()
+            raise httpx.ReadTimeout("read timed out")
             yield  # 使函数成为 async generator（async for 需要）
 
     class TimeoutStreamCM:
@@ -367,7 +367,7 @@ def test_chat_stream_timeout() -> None:
     client._client = SlowClient()
     r = asyncio.run(client.chat_stream("m", [{"role": "user", "content": "hi"}]))
     assert not r.ok
-    assert "timeout" in r.error.lower()
+    assert r.error == "stream timeout"
 
 
 def test_chat_stream_exception() -> None:

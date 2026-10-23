@@ -2,6 +2,8 @@
 
 import json
 import os
+from datetime import datetime
+from pathlib import Path
 
 from relay_audit import reporter
 from relay_audit.models import ChatResult, Finding, ScanConfig, ScanResult, Severity
@@ -131,7 +133,7 @@ def test_count_findings() -> None:
 
 def test_response_preview() -> None:
     assert "无响应" in reporter._response_preview("")
-    p = reporter._response_preview("x" * 500, 50)
+    p = reporter._response_preview("word " * 100, 50)
     assert len(p) < 500 and "…" in p
     p2 = reporter._response_preview("key sk-abcdefghijklmnop12345678 here", 200)
     assert "sk-" not in p2 and "[REDACTED]" in p2
@@ -183,7 +185,10 @@ def test_print_plain(capsys) -> None:
     r = _scan(
         findings=[
             Finding(
-                Severity.HIGH, "高危标题", "detail with sk-abcdefghijklmnop123456 key", "identity"
+                Severity.HIGH,
+                "高危标题",
+                "detail with sk-abcdefghijklmnop123456 key",
+                "identity",
             ),
         ],
         results=[_r(ok=True, latency_ms=100, usage={"total_tokens": 10})],
@@ -326,7 +331,13 @@ def test_generate_html() -> None:
         results=[
             _r(name="基础对话", ok=True, latency_ms=320),
             _r(name="拒绝-破坏性", ok=False, status=400),
-            _r(name="基础对话2", ok=False, status=500, error="HTTP 500: internal", content=""),
+            _r(
+                name="基础对话2",
+                ok=False,
+                status=500,
+                error="HTTP 500: internal",
+                content="",
+            ),
             _r(name="流式响应", ok=True, latency_ms=500, streaming=True),
             _r(name="突发_1", ok=False, status=0),  # 诊断测试
         ],
@@ -439,3 +450,96 @@ def test_report_ttl_days_env(monkeypatch) -> None:
     monkeypatch.setenv("RELAY_AUDIT_REPORT_TTL_DAYS", "bad")
     mod = importlib.reload(reporter)
     assert mod.REPORT_TTL_DAYS == 7
+
+
+# ── M4/M5/M7 回归 ─────────────────────────────────────────
+
+
+class _FixedDatetime(datetime):
+    """固定时钟：模拟同毫秒内连续保存（monkeypatch 替换 reporter.dt.datetime）。"""
+
+    @classmethod
+    def now(cls, tz=None):
+        return cls(2020, 1, 1, 12, 0, 0, 123456)
+
+
+def test_save_report_same_instant_no_overwrite(monkeypatch, tmp_path) -> None:
+    """M4 回归：同毫秒两次自动命名保存 → 两个不同文件，内容各自完整。"""
+    monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path)
+    monkeypatch.setattr(reporter.dt, "datetime", _FixedDatetime)
+    r1 = _scan(findings=[Finding(Severity.HIGH, "第一份报告标记", "d")])
+    r2 = _scan(findings=[Finding(Severity.LOW, "第二份报告标记", "d")])
+    p1 = reporter.save_report(r1)
+    p2 = reporter.save_report(r2)
+    p3 = reporter.save_report(r1)
+    assert len({p1, p2, p3}) == 3  # 毫秒相同 → 序号逐级错开
+    for p in (p1, p2, p3):
+        assert os.path.isfile(p)
+    html1 = Path(p1).read_text(encoding="utf-8")
+    html2 = Path(p2).read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in html1 and "<!DOCTYPE html>" in html2
+    assert "第一份报告标记" in html1 and "第二份报告标记" not in html1
+    assert "第二份报告标记" in html2 and "第一份报告标记" not in html2
+
+
+def test_clean_old_reports_single_failure_continues(monkeypatch, tmp_path, capsys) -> None:
+    """M5 回归：单文件删除失败（Windows 占用）跳过并继续清理其余文件。"""
+    files = []
+    for i in range(3):
+        f = tmp_path / f"relay_report_2020010{i}_000000.html"
+        f.write_text("x")
+        os.utime(f, (1000000000, 1000000000))
+        files.append(f)
+    real_remove = os.remove
+
+    def flaky_remove(path):
+        if os.fspath(path) == os.fspath(files[1]):
+            raise PermissionError("file in use")
+        real_remove(path)
+
+    monkeypatch.setattr(reporter.os, "remove", flaky_remove)
+    reporter._clean_old_reports(str(tmp_path), days=7)
+    assert not files[0].exists()
+    assert files[1].exists()  # 被占用的文件保留
+    assert not files[2].exists()  # 后续文件仍被清理
+    assert "清理失败" in capsys.readouterr().err
+
+
+def test_print_rich_markup_injection_escaped(capsys) -> None:
+    """M7 回归：远端内容含 rich 标记（[/dim]、[bold red]）不崩终端报告。"""
+    poison_detail = "[/dim][/dim] and [bold red]boom[/]"
+    r = _scan(
+        findings=[
+            Finding(
+                Severity.HIGH,
+                "问题[/dim]",
+                poison_detail,
+                "identity",
+                reason="尾注[bold]",
+            )
+        ],
+        results=[_r(model_req="m[/cyan]x", model_ret="evil[bold red]")],
+    )
+    r.config.base_url = "https://x[/bold]"
+    reporter.print_terminal(r)  # 不得抛 MarkupError
+    out = capsys.readouterr().out
+    assert "Relay Audit" in out
+    assert "boom" in out  # 内容仍可见（已转义为纯文本）
+
+
+def test_print_model_comparison_escapes_model_names(capsys) -> None:
+    """M7 回归：对比表中的模型名含 rich 标记时不崩。"""
+    rows = [
+        {
+            "model": "evil[/bold]name",
+            "risk": "LOW",
+            "high": 0,
+            "med": 0,
+            "low": 0,
+            "passed": "1/1",
+            "avg_lat": 10,
+        }
+    ]
+    reporter.print_model_comparison(rows)  # 不得抛
+    out = capsys.readouterr().out
+    assert "evil" in out

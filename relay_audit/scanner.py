@@ -20,7 +20,7 @@ from .analysis import (
 )
 from .client import ApiClient
 from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity
-from .patterns import short
+from .patterns import register_secret_keys, short
 
 
 async def fetch_models(base_url: str, api_key: str, timeout: int = 30) -> list[str]:
@@ -178,11 +178,37 @@ def _dedup_sort(findings: list[Finding]) -> list[Finding]:
     return sorted(seen.values(), key=lambda x: x.severity.rank, reverse=True)
 
 
+def _analyze_safe(r: ChatResult, kind: str = "quality") -> list[Finding]:
+    """毒数据纵深防御（H1）：单项分析崩溃时降级为警告级发现，扫描继续。
+
+    上游 client 已对 usage 做安全化，这里兜底其他路径漏入的畸形数据
+    （直接构造 ChatResult、预取结果等），保证单检测项分析异常
+    不会炸掉整场扫描。
+    """
+    try:
+        return analyze_chat(r, kind)
+    except Exception as exc:
+        return [
+            Finding(
+                Severity.LOW,
+                f"单项分析失败: {r.name}",
+                short(f"分析 {r.name} 结果时出现异常: {exc}", 200),
+                "quality",
+                "该测试结果包含畸形数据（疑似中转站投毒），对应分析已跳过",
+            )
+        ]
+
+
 async def run_scan(config: ScanConfig) -> ScanResult:
     """执行完整扫描 — 6 大类别 20+ 项测试"""
     key = os.environ.get(config.api_key_env, "")
     if not key:
         raise ValueError(f"环境变量 {config.api_key_env} 未设置")
+
+    # M6 接入点：真实 Key 登记进脱敏管道——本扫描的所有报告出口
+    # （终端/HTML/JSON/serve 持久化）自动对该 key 做字面替换，
+    # 覆盖无前缀、非典型格式的私有 key（模式匹配兜不住的形态）。
+    register_secret_keys([key])
 
     findings: list[Finding] = []
     results: list[ChatResult] = []
@@ -258,9 +284,10 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 async with _sem:
                     return await client.list_models()
 
-            (status, raw_models, _parsed, _lat, raw_headers), ping = await asyncio.gather(
-                _list_models_task(), _ping_task()
-            )
+            (
+                (status, raw_models, _parsed, _lat, raw_headers),
+                ping,
+            ) = await asyncio.gather(_list_models_task(), _ping_task())
 
             for item in raw_models:
                 if isinstance(item, dict):
@@ -651,7 +678,17 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     _progress(
                         "突发_1",
                         ChatResult(
-                            "突发_1", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)
+                            "突发_1",
+                            config.model,
+                            False,
+                            0,
+                            0,
+                            "",
+                            str(e),
+                            {},
+                            "",
+                            0,
+                            str(e),
                         ),
                     )
                     return [
@@ -735,12 +772,22 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 sr.name = "流式响应"
                 _progress(sr.name, sr)
                 results.append(sr)
-                findings.extend(analyze_chat(sr, "quality"))
+                findings.extend(_analyze_safe(sr, "quality"))
             except Exception as e:
                 _progress(
                     "流式响应",
                     ChatResult(
-                        "流式响应", config.model, False, 0, 0, "", str(e), {}, "", 0, str(e)
+                        "流式响应",
+                        config.model,
+                        False,
+                        0,
+                        0,
+                        "",
+                        str(e),
+                        {},
+                        "",
+                        0,
+                        str(e),
                     ),
                 )
                 results.append(
@@ -769,7 +816,17 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 _progress(
                     "异常",
                     ChatResult(
-                        "异常", config.model, False, 0, 0, "", str(item), {}, "", 0, str(item)
+                        "异常",
+                        config.model,
+                        False,
+                        0,
+                        0,
+                        "",
+                        str(item),
+                        {},
+                        "",
+                        0,
+                        str(item),
                     ),
                 )
                 results.append(
@@ -793,7 +850,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                 continue
             for r, kind in item:
                 results.append(r)
-                findings.extend(analyze_chat(r, kind))
+                findings.extend(_analyze_safe(r, kind))
                 # 收集稳定性结果用于聚合分析
                 if r.name.startswith("稳定性_") and r.ok:
                     stab_lats.append(r.latency_ms)
