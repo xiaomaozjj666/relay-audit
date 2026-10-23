@@ -1,5 +1,8 @@
 name: CI
 
+permissions:
+  contents: read
+
 on:
   push:
   pull_request:
@@ -14,6 +17,7 @@ concurrency:
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -23,8 +27,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install -e .
+          # 开发依赖以 pyproject.toml 的 [project.optional-dependencies].dev 为唯一来源
+          pip install -e ".[dev]"
       - name: Ruff check
         run: ruff check .
       - name: Ruff format
@@ -45,6 +49,7 @@ jobs:
           - os: windows-latest
             python-version: '3.12'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -54,8 +59,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements-dev.txt
-          pip install -e .
+          # 开发依赖以 pyproject.toml 的 [project.optional-dependencies].dev 为唯一来源
+          pip install -e ".[dev]"
       - name: Run tests
         # 覆盖率门禁只在基准组合（ubuntu + 3.12）执行，其余矩阵项只跑测试
         if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'

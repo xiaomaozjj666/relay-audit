@@ -7,12 +7,11 @@
 ```bash
 git clone https://github.com/xiaomaozjj666/relay-audit.git
 cd relay-audit
-python -m pip install -r requirements-dev.txt
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
 要求 Python 3.10+。开发依赖的版本边界以 `pyproject.toml` 的 `[project.optional-dependencies].dev`
-为准（例如 ruff pin 在 `<0.16`，避免新版默认规则导致 CI 不可复现）。
+为准（例如 ruff pin 在 `<0.18`，避免新版默认规则导致 CI 不可复现）。
 
 ## 提交前请通过
 

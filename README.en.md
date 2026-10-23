@@ -79,8 +79,7 @@ Keys are redacted in all reports and logs. `--save-key` stores the key with rest
 ## Development
 
 ```bash
-python -m pip install -r requirements-dev.txt
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 pytest
 ruff check .
 ruff format --check .

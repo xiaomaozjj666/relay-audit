@@ -1,5 +1,8 @@
 name: Release
 
+permissions:
+  contents: read
+
 on:
   push:
     tags:
@@ -8,6 +11,7 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -31,6 +35,7 @@ jobs:
     # https://docs.pypi.org/trusted-publishers/
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: pypi
     permissions:
       # OIDC trusted publishing 必需
@@ -47,6 +52,7 @@ jobs:
     # tag 版本发布后自动创建 GitHub Release，notes 取 CHANGELOG 对应版本段
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write
     steps:

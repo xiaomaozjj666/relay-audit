@@ -73,7 +73,7 @@ cd relay-audit
 python -m pip install -e .
 ```
 
-若已发布到 PyPI，也可直接 `pip install relay-audit`。
+也可直接从 PyPI 安装：`pip install relay-audit`。
 
 ### 最简用法
 
@@ -275,11 +275,8 @@ relay_audit/
 ## 开发
 
 ```bash
-# 安装开发依赖
-python -m pip install -r requirements-dev.txt
-
-# 本地安装
-python -m pip install -e .
+# 安装开发依赖（同时以可编辑模式安装项目本身）
+python -m pip install -e ".[dev]"
 
 # 运行测试
 pytest tests/ -v
