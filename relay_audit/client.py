@@ -336,7 +336,7 @@ class ApiClient:
                         oversize,
                     )
                 return _parse_chat_response(model, r.status_code, r, lat)
-            except (TimeoutError, httpx.TimeoutException):
+            except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
                 lat = time.perf_counter() - t0
                 # 超时不重试 — 中转站慢就是慢
                 return ChatResult(
@@ -455,7 +455,7 @@ class ApiClient:
                     payload = acc.flush()
                     if payload is not None:
                         _apply_stream_payload(payload, state, t0)
-        except httpx.TimeoutException:
+        except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
             lat = time.perf_counter() - t0
             return ChatResult(
                 "",
