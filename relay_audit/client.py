@@ -9,6 +9,7 @@ import time
 from typing import Any
 
 import httpx
+from typing_extensions import Self
 
 from .models import ChatResult
 
@@ -258,7 +259,7 @@ class ApiClient:
         self.timeout = timeout
         self._client: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> ApiClient:
+    async def __aenter__(self) -> Self:
         self._client = httpx.AsyncClient(
             base_url=self.base,
             headers=self.headers,
