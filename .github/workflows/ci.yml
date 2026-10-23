@@ -33,12 +33,23 @@ jobs:
         run: mypy relay_audit
 
   test:
-    runs-on: ubuntu-latest
+    strategy:
+      # 兼容性问题需要完整暴露，单个版本失败不取消其余矩阵项
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        include:
+          # 工具重度面向 Windows 使用场景（.bat 入口/icacls 权限/报告目录
+          # 在 %LOCALAPPDATA%），补一个 Windows 验证点
+          - os: windows-latest
+            python-version: '3.12'
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install dependencies
         run: |
@@ -46,4 +57,9 @@ jobs:
           pip install -r requirements-dev.txt
           pip install -e .
       - name: Run tests
+        # 覆盖率门禁只在基准组合（ubuntu + 3.12）执行，其余矩阵项只跑测试
+        if: matrix.os == 'ubuntu-latest' && matrix.python-version == '3.12'
         run: pytest --cov=relay_audit --cov-report=term --cov-report=xml --cov-fail-under=95
+      - name: Run tests
+        if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
+        run: pytest -q

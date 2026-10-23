@@ -42,3 +42,40 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
+
+  github-release:
+    # tag 版本发布后自动创建 GitHub Release，notes 取 CHANGELOG 对应版本段
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # CHANGELOG 提取需要完整历史（不同 tag 的段落都可能在早先提交里）
+          fetch-depth: 0
+      - name: Extract changelog section for this tag
+        id: changelog
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          python - "$VERSION" <<'PYEOF' > release_notes.md
+          import re
+          import sys
+          from pathlib import Path
+
+          version = sys.argv[1]
+          text = Path("CHANGELOG.md").read_text(encoding="utf-8")
+          pattern = rf"^## \[{re.escape(version)}\][^\n]*\n(.*?)(?=^## \[|\Z)"
+          m = re.search(pattern, text, re.M | re.S)
+          body = m.group(1).strip() if m else ""
+          print(body if body else f"Release {version}")
+          PYEOF
+          cat release_notes.md
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes-file release_notes.md \
+            --verify-tag
