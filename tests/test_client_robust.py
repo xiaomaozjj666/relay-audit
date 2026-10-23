@@ -7,6 +7,7 @@ import asyncio
 
 import httpx
 import pytest
+
 from relay_audit import client as client_module
 from relay_audit.client import (
     ApiClient,
@@ -94,9 +95,7 @@ WEIRD_TOKEN_VALUES = [
 ]
 
 
-@pytest.mark.parametrize(
-    "field", ["prompt_tokens", "completion_tokens", "total_tokens"]
-)
+@pytest.mark.parametrize("field", ["prompt_tokens", "completion_tokens", "total_tokens"])
 @pytest.mark.parametrize("value_expected", WEIRD_TOKEN_VALUES, ids=str)
 def test_sanitize_usage_matrix(field, value_expected) -> None:
     value, expected = value_expected
@@ -145,9 +144,7 @@ def test_parse_chat_response_malformed_usage() -> None:
 
 def test_parse_chat_response_usage_not_dict() -> None:
     """usage 本身非 dict → 空字典（既有行为保持）。"""
-    resp = httpx.Response(
-        200, json={"choices": [{"message": {"content": "x"}}], "usage": "nope"}
-    )
+    resp = httpx.Response(200, json={"choices": [{"message": {"content": "x"}}], "usage": "nope"})
     r = _parse_chat_response("m", 200, resp, 0.1)
     assert r.usage == {}
 
@@ -225,9 +222,7 @@ def test_stream_finish_reason_counts_as_termination() -> None:
     """finish_reason 终止信号足以避免截断告警（部分实现不发 [DONE]）。"""
 
     def handler(request):
-        body = (
-            b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
-        )
+        body = b'data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
         return httpx.Response(200, content=body)
 
     r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
@@ -380,14 +375,10 @@ def test_extract_error_body_unit() -> None:
     assert _extract_error_body(b"plain text") == "plain text"
     assert _extract_error_body(b"") == ""
     long_msg = b"x" * 300
-    assert (
-        len(_extract_error_body(b'{"error":{"message":"' + long_msg + b'"}}')) == 200
-    )  # 截断
+    assert len(_extract_error_body(b'{"error":{"message":"' + long_msg + b'"}}')) == 200  # 截断
     assert len(_extract_error_body(long_msg)) == 200
     # error.message 非 str → 回退原文
-    assert (
-        _extract_error_body(b'{"error":{"message":123}}') == '{"error":{"message":123}}'
-    )
+    assert _extract_error_body(b'{"error":{"message":123}}') == '{"error":{"message":123}}'
 
 
 # ── L5：响应体大小上限 ──────────────────────────────────────

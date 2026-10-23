@@ -6,6 +6,18 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [2.3.8] - 2026-10-23
+
+### 工程化
+
+- **PyPI 元数据补全**：keywords（openai / api-audit / relay-api /
+  llm / security-audit 等 10 项）与 classifiers（Production/Stable、
+  Security、Quality Assurance、Testing、Python 3.10-3.14 全版本）
+  ——直接改善 PyPI 搜索发现性与页面专业度。
+- README / README.en 徽章区补 PyPI version 与 pyversions（链接项目页）。
+- issue 模板三件套（bug 引导可复现报告含 key 脱敏提醒 / feature /
+  config 关闭空白 issue）+ Contributor Covenant 行为准则。
+
 ## [2.3.7] - 2026-10-23
 
 ### 修复（深度审查 · 威胁模型「被检测的中转站是恶意的」）

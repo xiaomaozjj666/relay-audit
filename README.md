@@ -1,7 +1,8 @@
 # Relay Audit
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Python-3.10%2B-3776AB" alt="Python 3.10+" />
+  <a href="https://pypi.org/project/relay-audit/"><img src="https://img.shields.io/pypi/v/relay-audit?color=blue" alt="PyPI version" /></a>
+  <a href="https://pypi.org/project/relay-audit/"><img src="https://img.shields.io/pypi/pyversions/relay-audit" alt="Python versions" /></a>
   <img src="https://img.shields.io/badge/httpx-async-0F6B9E" alt="httpx" />
   <img src="https://img.shields.io/badge/rich-terminal-FFC300" alt="rich" />
   <img src="https://img.shields.io/badge/tests-pytest-brightgreen" alt="pytest" />

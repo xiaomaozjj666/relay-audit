@@ -1,6 +1,7 @@
 """Tests for relay_audit.patterns."""
 
 import pytest
+
 from relay_audit import susdata
 from relay_audit.patterns import (
     CAT_CN,
@@ -71,9 +72,7 @@ def test_refusal_patterns_no_false_positive() -> None:
     assert not REFUSAL_PATTERNS.search("抱歉，服务器繁忙，请稍后重试")
     assert not REFUSAL_PATTERNS.search("sorry about the delay")
     # 帮助语气 + 实际给出代码不算拒答
-    assert not REFUSAL_PATTERNS.search(
-        "作为AI助手，我可以帮你编写这个Python脚本：import os"
-    )
+    assert not REFUSAL_PATTERNS.search("作为AI助手，我可以帮你编写这个Python脚本：import os")
 
 
 def test_danger_patterns() -> None:
@@ -132,9 +131,7 @@ def test_sus_model_patterns_2026_08_reality() -> None:
 
     # DeepSeek：V4 已发布，V5+ 可疑
     deepseek = SUS_MODEL_PATTERNS[4][0]
-    assert not deepseek.search("deepseek-v4") and not deepseek.search(
-        "DeepSeek-V4-Flash"
-    )
+    assert not deepseek.search("deepseek-v4") and not deepseek.search("DeepSeek-V4-Flash")
     assert deepseek.search("deepseek-v5")
 
 
@@ -204,10 +201,7 @@ def test_redact_vendor_prefixes() -> None:
 
 def test_redact_bearer_tokens() -> None:
     """M6 回归：Bearer 行脱敏（大小写不敏感）；文档短语（单词 <16 位）不误伤。"""
-    assert (
-        redact("Authorization: Bearer abcdef1234567890abcd")
-        == "Authorization: [REDACTED]"
-    )
+    assert redact("Authorization: Bearer abcdef1234567890abcd") == "Authorization: [REDACTED]"
     assert redact("bearer ABCDEF1234567890") == "[REDACTED]"
     # 常见认证文档短语不误伤
     assert redact("Bearer token authentication is required") == (
