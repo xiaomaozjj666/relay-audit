@@ -494,3 +494,59 @@ def test_chat_stream_builtin_timeout_falls_to_generic() -> None:
     r = asyncio.run(client.chat_stream("m", [{"role": "user", "content": "hi"}]))
     assert not r.ok
     assert "timeout" in r.error.lower()
+
+
+# ── L5 补遗：_oversize_error 兜底分支 / _read_capped 截断分支 / 流式非 2xx 超限 ──
+
+
+def test_oversize_error_body_fallback_when_header_lies() -> None:
+    """L5 兜底分支：Content-Length 头声明未超限但实际 body 超限（头撒谎）→ 按实测拒绝。"""
+    from relay_audit.client import _oversize_error
+
+    resp = httpx.Response(
+        200,
+        headers={"content-length": "100"},  # 头声称 100 字节
+        content=b"x" * (11 * 1024 * 1024),  # 实际 11MB
+    )
+    err = _oversize_error(resp)
+    assert err is not None
+    assert "响应体超限" in err
+    assert "11010048" not in err or "11" in err  # 错误信息带实测大小
+
+
+def test_read_capped_truncation_stops_early() -> None:
+    """L5 截断分支：累计超 _MAX_RESPONSE_BYTES 即置 truncated 并停止读取后续块。"""
+    from relay_audit.client import _MAX_RESPONSE_BYTES, _read_capped
+
+    consumed: list[bytes] = []
+
+    class _Resp:
+        async def aiter_bytes(self):
+            for chunk in (
+                b"a" * (_MAX_RESPONSE_BYTES // 2),
+                b"b" * (_MAX_RESPONSE_BYTES // 2 + 1),  # 累计越界 → 触发截断
+                b"c" * 16,  # 截断后不应被消费
+            ):
+                consumed.append(chunk)
+                yield chunk
+
+    raw, truncated = _run(_read_capped(_Resp()))
+    assert truncated is True
+    assert len(consumed) == 2  # 第三块不再读取
+    assert raw == b"a" * (_MAX_RESPONSE_BYTES // 2)  # 只保留超限前的完整块
+
+
+def test_stream_non_2xx_oversized_body_notes_truncation() -> None:
+    """L5：流式端点返回非 2xx 且错误体超限 → error 带「响应超限截断」且不透传全量。"""
+
+    def handler(request):
+        return httpx.Response(
+            403,
+            content=b"X" * (11 * 1024 * 1024),
+        )
+
+    r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
+    assert not r.ok
+    assert r.status == 403
+    assert "HTTP 403" in r.error
+    assert "响应超限截断" in r.error

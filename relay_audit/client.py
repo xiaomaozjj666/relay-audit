@@ -353,6 +353,8 @@ class ApiClient:
                     f"timeout>{timeout}s",
                 )
             except httpx.HTTPStatusError as e:
+                # 正常路径不触发（chat() 不调 raise_for_status）；防御
+                # 外部注入的 httpx 客户端启用 raise_for_status / event hooks
                 lat = time.perf_counter() - t0
                 oversize = _oversize_error(e.response)
                 if oversize:

@@ -440,3 +440,23 @@ def test_concurrent_chat_errors_captured() -> None:
     results = _run(_mk_client(handler).concurrent_chat(2, "m", [{"role": "user", "content": "hi"}]))
     assert len(results) == 2
     assert all(not r.ok for r in results)
+
+
+def test_chat_http_status_error_oversize() -> None:
+    """HTTPStatusError + 超限响应：oversize 子分支优先于错误体解析（防御注入客户端场景）。"""
+
+    def handler(request):
+        req = httpx.Request("POST", "https://fake.test/v1/chat/completions")
+        raise httpx.HTTPStatusError(
+            "boom",
+            request=req,
+            response=httpx.Response(
+                503,
+                headers={"content-length": str(20 * 1024 * 1024)},
+            ),
+        )
+
+    r = _run(_mk_client(handler).chat("m", [{"role": "user", "content": "hi"}]))
+    assert not r.ok
+    assert r.status == 503
+    assert "响应体超限" in r.error
