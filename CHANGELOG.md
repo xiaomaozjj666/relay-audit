@@ -6,6 +6,25 @@
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 （v2.3.0 起开始维护本文件；更早版本的内容依据提交历史整理。）
 
+## [Unreleased]
+
+### 修复
+
+- **密钥文件权限收紧在无控制台进程下更健壮**：`_save_key_to_file` 的
+  Windows icacls 授权对象从 `os.getlogin()`（无登录会话的进程——计划任务、
+  服务账户——会抛 OSError，且 Python 3.13 起标记弃用）改为
+  `getpass.getuser()`（走环境变量回退链 USERNAME 等），失败告警路径不变。
+
+### 文档
+
+- CHANGELOG 底部版本对比链接修正：`[Unreleased]` 基线从 v2.3.6 更新为
+  v2.3.8，补齐缺失的 `[2.3.8]`、`[2.3.7]` 链接定义（Keep a Changelog
+  规范要求每个已发布版本都有可点的 compare 链接）。
+- README.en 与中文版结构对齐：补 CI / tests / rich 徽章、检测流程图、
+  CLI 参数表、环境变量表与示例输出，不再是"精简概述"。
+- 中英 README 补 `--key` 命令行传参的安全提示（shell 历史残留风险，
+  建议环境变量或 `--save-key` 路径）。
+
 ## [2.3.8] - 2026-10-23
 
 ### 工程化
@@ -226,7 +245,9 @@
 - 信号量并发控制；HTTP 报告浏览服务器与 JSON 扫描结果持久化
 - rich 终端报告与 HTML 报告；Python CI（ruff / mypy / pytest）
 
-[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.6...HEAD
+[Unreleased]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.8...HEAD
+[2.3.8]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.7...v2.3.8
+[2.3.7]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.6...v2.3.7
 [2.3.6]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.5...v2.3.6
 [2.3.5]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.4...v2.3.5
 [2.3.4]: https://github.com/xiaomaozjj666/relay-audit/compare/v2.3.3...v2.3.4
