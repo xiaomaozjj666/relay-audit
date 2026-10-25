@@ -52,8 +52,11 @@ def _save_key_to_file(key: str) -> None:
         with open(kf_tmp, "w", encoding="utf-8") as f:
             f.write(key)
         try:
+            # getpass.getuser() 走环境变量回退链（USERNAME 等），
+            # 无控制台进程（计划任务/服务）下比 os.getlogin() 健壮
+            user = getpass.getuser()
             proc = subprocess.run(
-                ["icacls", kf_tmp, "/inheritance:r", "/grant:r", f"{os.getlogin()}:F"],
+                ["icacls", kf_tmp, "/inheritance:r", "/grant:r", f"{user}:F"],
                 capture_output=True,
                 check=False,
             )
