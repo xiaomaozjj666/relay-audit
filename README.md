@@ -166,10 +166,11 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--no-html` | 不生成 HTML 报告 | `false` |
 | `--skip-safety` | 跳过安全测试 | `false` |
 | `--config` | JSON 配置文件路径 | - |
-| `--save-key` | 保存 Key 到本地 | `false` |
+| `--save-key` | 保存 Key 到本地（配合 `--key` 或环境变量） | `false` |
 | `--models` / `--list-models` | 只展示模型列表，不跑测试 | `false` |
 | `--refresh-sus` | 在线刷新可疑模型名规则集并缓存本地 | `false` |
 | `--serve [PORT]` | 启动报告浏览服务器 | 8080 |
+| `--no-browser` | 配合 `--serve`：只监听不打开浏览器（远机/容器） | `false` |
 
 > 注意：`--save-key` 将 API Key **明文**保存在 `~/.relay_key`。工具会收紧该文件权限
 > （Linux/macOS 为 `0o600`，Windows 通过 `icacls` 仅授权当前用户），但不加密内容——

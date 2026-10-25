@@ -21,7 +21,9 @@ env/
 Thumbs.db
 
 # Reports
-reports/*.html
+# Reports：整个目录忽略（默认在 %LOCALAPPDATA%，但用户可用
+# RELAY_AUDIT_REPORTS_DIR 把报告目录指回仓库内，HTML/JSON 都不入库）
+reports/
 
 # Config
 .relay_key

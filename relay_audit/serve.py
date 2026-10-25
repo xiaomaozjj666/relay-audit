@@ -7,6 +7,7 @@ import html as htmlmod
 import json
 import mimetypes
 import re
+import threading
 import time
 import webbrowser
 from datetime import datetime
@@ -211,30 +212,33 @@ def list_reports() -> list[dict]:
 # ═══════════════════════════════════════════════════════════════
 
 _reports_cache: tuple[float, frozenset[str], list[dict]] = (0, frozenset(), [])
+_cache_lock = threading.Lock()
 
 
 def list_reports_cached() -> list[dict]:
     """Return cached report list, invalidated when any report file changes.
 
     文件被删除（清理）也会使缓存失效——仅比较 mtime 无法感知删除。
+    ThreadingHTTPServer 下多请求并发，读写都在锁内完成。
     """
     global _reports_cache
-    mtime = 0.0
-    names: set[str] = set()
-    if REPORTS_DIR.is_dir():
-        try:
-            for f in REPORTS_DIR.iterdir():
-                if f.is_file() and (
-                    (f.name.startswith("scan_") and f.name.endswith(".json"))
-                    or (f.name.startswith("relay_report_") and f.name.endswith(".html"))
-                ):
-                    names.add(f.name)
-                    mtime = max(mtime, f.stat().st_mtime)
-        except OSError:
-            mtime = time.time()
-    if names != set(_reports_cache[1]) or mtime > _reports_cache[0]:
-        _reports_cache = (mtime, frozenset(names), list_reports())
-    return _reports_cache[2]
+    with _cache_lock:
+        mtime = 0.0
+        names: set[str] = set()
+        if REPORTS_DIR.is_dir():
+            try:
+                for f in REPORTS_DIR.iterdir():
+                    if f.is_file() and (
+                        (f.name.startswith("scan_") and f.name.endswith(".json"))
+                        or (f.name.startswith("relay_report_") and f.name.endswith(".html"))
+                    ):
+                        names.add(f.name)
+                        mtime = max(mtime, f.stat().st_mtime)
+            except OSError:
+                mtime = time.time()
+        if names != set(_reports_cache[1]) or mtime > _reports_cache[0]:
+            _reports_cache = (mtime, frozenset(names), list_reports())
+        return _reports_cache[2]
 
 
 class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):

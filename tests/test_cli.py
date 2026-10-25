@@ -964,6 +964,53 @@ def test_main_serve(monkeypatch) -> None:
     assert captured["port"] == 8080
 
 
+def test_main_serve_no_browser(monkeypatch) -> None:
+    """--serve --no-browser：只监听，不自动打开浏览器。"""
+    captured = {}
+
+    def fake_run_server(port, open_browser=True):
+        captured["open"] = open_browser
+
+    monkeypatch.setattr("relay_audit.serve.run_server", fake_run_server)
+    assert cli.main(["--serve", "--no-browser"]) == 0
+    assert captured["open"] is False
+
+
+def test_main_save_key_from_env(monkeypatch) -> None:
+    """--save-key 未给 --key 时应保存环境变量里的 Key（此前静默无效）。"""
+    monkeypatch.setenv("RELAY_API_KEY", "sk-env")
+    saved: list[str] = []
+    monkeypatch.setattr(cli, "_save_key_to_file", lambda k: saved.append(k))
+    monkeypatch.setattr(cli, "execute_scan", lambda cfg: (0, "", None))
+    assert cli.main(["--base-url", "https://api.example.com", "--save-key"]) == 0
+    assert saved == ["sk-env"]
+
+
+def test_main_save_key_from_flag(monkeypatch) -> None:
+    """--key + --save-key：保存 --key 的值并写回环境变量。"""
+    monkeypatch.delenv("RELAY_API_KEY", raising=False)
+    saved: list[str] = []
+    monkeypatch.setattr(cli, "_save_key_to_file", lambda k: saved.append(k))
+    monkeypatch.setattr(cli, "execute_scan", lambda cfg: (0, "", None))
+    assert (
+        cli.main(["--base-url", "https://api.example.com", "--key", "sk-flag", "--save-key"]) == 0
+    )
+    assert saved == ["sk-flag"]
+    assert os.environ["RELAY_API_KEY"] == "sk-flag"
+    monkeypatch.delenv("RELAY_API_KEY", raising=False)  # main() 直写环境，交回 monkeypatch 兜底清理
+
+
+def test_main_save_key_no_source_warns(monkeypatch, capsys) -> None:
+    """--save-key 但既无 --key 也无环境变量 → 显式告警，不落盘。"""
+    monkeypatch.delenv("RELAY_API_KEY", raising=False)
+    saved: list[str] = []
+    monkeypatch.setattr(cli, "_save_key_to_file", lambda k: saved.append(k))
+    monkeypatch.setattr(cli, "execute_scan", lambda cfg: (0, "", None))
+    assert cli.main(["--base-url", "https://api.example.com", "--save-key"]) == 0
+    assert saved == []
+    assert "未找到可保存的 Key" in capsys.readouterr().err
+
+
 def test_main_refresh_sus(monkeypatch, tmp_path, capsys) -> None:
     """--refresh-sus 拉取成功 → 打印版本与缓存路径，返回 0。"""
     monkeypatch.setenv("RELAY_AUDIT_DATA_DIR", str(tmp_path / "data"))

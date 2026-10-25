@@ -6,6 +6,7 @@ import datetime as dt
 import html as htmlmod
 import json
 import os
+import sys
 from typing import Any
 
 from relay_audit import REPORTS_DIR
@@ -853,8 +854,6 @@ def _clean_old_reports(dir_path: str, days: int = REPORT_TTL_DAYS) -> None:
     try:
         entries = os.listdir(dir_path)
     except Exception:
-        import sys
-
         print("  [!] 清理旧报告失败", file=sys.stderr)
         return
     failures: list[str] = []
@@ -871,6 +870,4 @@ def _clean_old_reports(dir_path: str, days: int = REPORT_TTL_DAYS) -> None:
         except OSError:
             failures.append(name)
     if failures:
-        import sys
-
         print(f"  [!] {len(failures)} 个旧报告清理失败（可能被占用）", file=sys.stderr)

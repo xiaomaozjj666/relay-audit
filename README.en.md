@@ -37,6 +37,14 @@ flowchart LR
     J --> L
 ```
 
+## Sample report
+
+HTML report produced by a full scan against the bundled mock relay — risk level, score, pass rate, and failed probes at a glance:
+
+| HTML visual report (low-risk sample) |
+| :---: |
+| <img src="docs/screenshots/report-sample.png" alt="Relay Audit sample report" width="820" /> |
+
 ## What it checks
 
 - **Identity** — model self-identification probes, model-swap detection (requested model vs. returned model vs. `/v1/models` list), knowledge-cutoff probe, model fingerprinting, suspicious / non-standard model names (rules live in a versioned JSON dataset — `--refresh-sus` pulls updated thresholds without upgrading the tool)
@@ -89,8 +97,9 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--timeout N` / `--samples N` | Probe tuning (defaults: 60 s / 2 samples) |
 | `--key KEY` | Pass the key directly (see shell-history note above) |
 | `--api-key-env VAR` | Read the key from a different env var (default `RELAY_API_KEY`) |
-| `--save-key` | Store the key locally with restrictive permissions |
+| `--save-key` | Store the key locally with restrictive permissions (works with `--key` or the env var) |
 | `--serve [PORT]` | Browse persisted reports in a local web UI (default 8080) |
+| `--no-browser` | With `--serve`: listen only, don't open a browser (remote/container use) |
 | `--refresh-sus` | Update the suspicious-model ruleset from the versioned dataset |
 | `--models` | Just list the endpoint's available models, no probes |
 

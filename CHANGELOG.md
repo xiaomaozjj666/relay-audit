@@ -8,12 +8,35 @@
 
 ## [Unreleased]
 
+### 新增
+
+- `--serve --no-browser`：报告浏览服务器只监听端口、不自动打开浏览器，
+  适配远机 / 容器 / 计划任务等无桌面场景。
+
 ### 修复
 
+- `--save-key` 不再静默无效：此前保存逻辑嵌套在 `--key` 分支内，只给
+  环境变量或交互输入 Key 时加 `--save-key` 什么都不会发生、也无提示。
+  现在两条来路（`--key` / 环境变量）都会保存；两者都没有时显式告警。
+- 报告浏览服务器的 mtime 缓存改为锁内读写：`ThreadingHTTPServer`
+  多请求并发下原实现存在良性竞态（最坏情况重复解析），现收口为串行。
+- `requirements.txt` 补 `typing-extensions>=4.6,<5`：`client.py` 直接
+  `from typing_extensions import Self`，此前仅靠传递依赖补位。现在
+  requirements.txt 与 pyproject 的依赖声明一致。
+- `.gitignore` 的 `reports/*.html` 收紧为整个 `reports/`：用户通过
+  `RELAY_AUDIT_REPORTS_DIR` 把报告目录指回仓库时，JSON 报告不再变成
+  未跟踪噪音。
 - **密钥文件权限收紧在无控制台进程下更健壮**：`_save_key_to_file` 的
   Windows icacls 授权对象从 `os.getlogin()`（无登录会话的进程——计划任务、
   服务账户——会抛 OSError，且 Python 3.13 起标记弃用）改为
   `getpass.getuser()`（走环境变量回退链 USERNAME 等），失败告警路径不变。
+
+### 变更
+
+- 配置文件默认值快照改用公开 API（空 argv 重新 `parse_args`）获取，
+  不再遍历 argparse 私有的 `ap._actions`（跨版本脆弱）。
+- `reporter.py` 的 `sys` 提升为模块级导入，去掉错误分支里两处
+  函数内重复 `import sys`。
 
 ### 文档
 
@@ -21,9 +44,9 @@
   v2.3.8，补齐缺失的 `[2.3.8]`、`[2.3.7]` 链接定义（Keep a Changelog
   规范要求每个已发布版本都有可点的 compare 链接）。
 - README.en 与中文版结构对齐：补 CI / tests / rich 徽章、检测流程图、
-  CLI 参数表、环境变量表与示例输出，不再是"精简概述"。
+  示例报告截图、CLI 参数表与环境变量表。
 - 中英 README 补 `--key` 命令行传参的安全提示（shell 历史残留风险，
-  建议环境变量或 `--save-key` 路径）。
+  建议环境变量或 `--save-key` 路径），并同步 `--no-browser` 参数说明。
 
 ## [2.3.8] - 2026-10-23
 

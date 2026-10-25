@@ -592,6 +592,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="启动报告查看服务器（默认端口 8080），可浏览历史扫描结果",
     )
     ap.add_argument(
+        "--no-browser",
+        action="store_true",
+        help="配合 --serve：只监听端口，不自动打开浏览器（远机/容器场景）",
+    )
+    ap.add_argument(
         "--refresh-sus",
         action="store_true",
         help="在线刷新可疑模型名规则集（厂商发新版后更新判定阈值，无需升级工具）",
@@ -631,7 +636,7 @@ def main(argv: list[str] | None = None) -> int:
         from .serve import run_server
 
         try:
-            run_server(port=args.serve, open_browser=True)
+            run_server(port=args.serve, open_browser=not args.no_browser)
         except OSError as e:
             print(
                 f"  [x] 无法启动报告服务器：端口 {args.serve} 可能被占用 ({e})",
@@ -657,7 +662,8 @@ def main(argv: list[str] | None = None) -> int:
         # 仅当某参数未被 CLI 显式提供（当前值仍等于 argparse 默认值）时，
         # 才允许配置文件覆盖。不能用"值是否为 falsy"判断——
         # 显式传入的 --samples 0 会因 0 == False 被误判为未设置而遭覆盖。
-        arg_defaults = {a.dest: a.default for a in ap._actions}
+        # 用空 argv 重新解析得到默认值快照，避免依赖 argparse 私有结构。
+        arg_defaults = vars(ap.parse_args([]))
         config_keys = [
             "base_url",
             "model",
@@ -683,8 +689,17 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.key:
         os.environ[args.api_key_env or "RELAY_API_KEY"] = args.key
-        if args.save_key:
-            _save_key_to_file(args.key)
+    if args.save_key:
+        # --key 与环境变量两条来路都支持保存：此前只在给了 --key 时生效，
+        # 仅用环境变量 + --save-key 的合法用法会静默无效。
+        key_to_save = args.key or os.environ.get(args.api_key_env or "RELAY_API_KEY", "")
+        if key_to_save:
+            _save_key_to_file(key_to_save)
+        else:
+            print(
+                "  [!] --save-key 未找到可保存的 Key：请用 --key 提供或先设置环境变量",
+                file=sys.stderr,
+            )
 
     if args.list_models:
         return cmd_list_models(args)
