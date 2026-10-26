@@ -134,12 +134,33 @@ def test_snapshot_infers_risk_and_merges_duplicate_tests() -> None:
         ({"tests": []}, "非空"),
         ({"results": "nope"}, "非空"),
         ({"tests": [{"ok": True}]}, "缺少 name"),
+        ({"tests": [{"name": "x", "ok": "yes"}]}, "布尔"),
         ({"tests": ["x"]}, "不是 JSON 对象"),
     ],
 )
 def test_snapshot_rejects_bad_payloads(payload: object, message: str) -> None:
     with pytest.raises(ValueError, match=message):
         benchmark.snapshot_from_payload(payload)  # type: ignore[arg-type]
+
+
+def test_snapshot_guards_non_finite_and_negative_numbers() -> None:
+    payload = {
+        "tests": [
+            {
+                "name": "x",
+                "ok": True,
+                "status": float("inf"),
+                "latency_ms": float("nan"),
+            }
+        ],
+        "summary": {"high": -3, "medium": float("inf")},
+    }
+    snap = _snapshot(payload)
+    observation = snap["observations"][0]
+    assert observation["status"] == 0
+    assert observation["latency_ms"] == 0
+    assert snap["summary"]["high"] == 0
+    assert snap["summary"]["medium"] == 0
 
 
 def test_load_scan_records_source_and_hash(tmp_path: Path) -> None:
@@ -169,8 +190,19 @@ def test_save_load_and_validate_snapshot(tmp_path: Path) -> None:
     [
         ({"snapshot_version": 99, "observations": [{"name": "x"}]}, "版本"),
         ({"snapshot_version": 1, "observations": []}, "observations"),
-        ({"snapshot_version": 1, "observations": [{"name": "x"}, {"name": "x"}]}, "重复"),
+        (
+            {
+                "snapshot_version": 1,
+                "observations": [{"name": "x", "ok": True}, {"name": "x", "ok": True}],
+            },
+            "重复",
+        ),
         ({"snapshot_version": 1, "observations": [{"ok": True}]}, "缺少 name"),
+        ({"snapshot_version": 1, "observations": [{"name": "x", "ok": "no"}]}, "布尔"),
+        (
+            {"snapshot_version": 1, "observations": [{"name": "x", "ok": True, "latency_ms": -1}]},
+            "非负整数",
+        ),
     ],
 )
 def test_validate_snapshot_rejects(tmp_path: Path, payload: dict, message: str) -> None:
@@ -343,6 +375,30 @@ def test_history_orders_and_skips_invalid(tmp_path: Path) -> None:
     assert "2026-10-01" in text and "通过" in text
 
 
+def test_render_history_marks_context_breaks(tmp_path: Path) -> None:
+    high = [{"severity": "high", "category": "identity", "title": "模型偷换"}]
+    first = _snapshot(_scan([_test("a", True)]), "2026-10-01T00:00:00")
+    worse = _snapshot(
+        _scan([_test("a", True)], findings=high),
+        "2026-10-02T00:00:00",
+    )
+    other = _snapshot(
+        _scan([_test("a", True)], base_url="https://other.example.com"),
+        "2026-10-03T00:00:00",
+    )
+    switched = _snapshot(
+        _scan([_test("a", True)], base_url="https://other.example.com", model="gpt-4o-mini"),
+        "2026-10-04T00:00:00",
+    )
+
+    text = benchmark.render_history([first, worse, other, switched])
+    assert "端点" in text
+    assert "relay.example.com" in text and "other.example.com" in text
+    assert "↑" in text
+    assert "↓" not in text
+    assert "已跳过风险箭头" in text
+
+
 def test_render_history_empty() -> None:
     assert benchmark.render_history([]) == "没有可用的快照。"
 
@@ -393,6 +449,14 @@ def test_cli_errors(tmp_path: Path, capsys) -> None:
     bad.write_text("not-json", encoding="utf-8")
     assert benchmark.main(["capture", str(bad)]) == 2
     assert "失败" in capsys.readouterr().err
+
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    assert benchmark.main(["capture", str(empty)]) == 2
+    assert "没有 JSON" in capsys.readouterr().err
+
+    assert benchmark.main(["history", str(tmp_path / "missing-dir")]) == 2
+    assert "快照目录不存在" in capsys.readouterr().err
 
 
 def test_main_cli_snapshot_flag(tmp_path: Path, monkeypatch, capsys) -> None:

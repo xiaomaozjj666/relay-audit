@@ -22,6 +22,11 @@ relay-audit-benchmark compare ./bench/a.json ./bench/b.json --markdown diff.md
 relay-audit-benchmark history ./bench
 ```
 
+时间线表格会显示端点、模型、风险、通过数与中位延迟。风险箭头只在相邻快照的
+端点、模型和探针套件都一致时标注；混合多个端点时，跨端点的风险变化会被跳过
+并在表尾说明，避免把不同环境的变化误读成同一端点的趋势。`capture` 空目录、
+`history` 目录不存在都会以退出码 2 报错，而不是静默成功。
+
 也可以直接用 `python -m relay_audit.benchmark ...`。
 
 ## 快照格式

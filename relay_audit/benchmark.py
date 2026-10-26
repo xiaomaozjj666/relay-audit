@@ -66,9 +66,9 @@ def _as_int(value: Any) -> int:
     if isinstance(value, bool):
         return 0
     if isinstance(value, int):
-        return value
+        return max(0, value)
     if isinstance(value, float):
-        return int(value)
+        return int(value) if math.isfinite(value) and value >= 0 else 0
     return 0
 
 
@@ -94,9 +94,12 @@ def _merge_observations(raw: list[dict[str, Any]], label: str) -> list[Observati
         name = str(item.get("name", "")).strip()
         if not name:
             raise ValueError(f"{label} 第 {index} 条缺少 name")
+        raw_ok = item.get("ok")
+        if not isinstance(raw_ok, bool):
+            raise ValueError(f"{label} 第 {index} 条的 ok 必须是布尔值")
         observation = Observation(
             name=name,
-            ok=bool(item.get("ok")),
+            ok=raw_ok,
             status=_as_int(item.get("status")),
             latency_ms=_as_int(item.get("latency_ms")),
             model_ret=str(item.get("model_ret") or ""),
@@ -215,6 +218,12 @@ def _validate_snapshot(payload: dict[str, Any]) -> dict[str, Any]:
         if name in names:
             raise ValueError(f"observations 存在重复探针: {name}")
         names.add(name)
+        if not isinstance(item.get("ok"), bool):
+            raise ValueError(f"observations 第 {index} 条的 ok 必须是布尔值")
+        for field in ("status", "latency_ms"):
+            value = item.get(field, 0)
+            if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                raise ValueError(f"observations 第 {index} 条的 {field} 必须是非负整数")
     return payload
 
 
@@ -242,6 +251,7 @@ def capture_result(result: ScanResult, out_dir: str | Path | None = None) -> Pat
 def save_snapshot(snapshot: dict[str, Any], out_dir: str | Path | None = None) -> Path:
     if not isinstance(snapshot, dict) or "observations" not in snapshot:
         raise ValueError("不是有效快照")
+    _validate_snapshot(snapshot)
     directory = Path(out_dir) if out_dir else Path(REPORTS_DIR) / "benchmarks"
     directory.mkdir(parents=True, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -499,12 +509,24 @@ def render_comparison(payload: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _short_endpoint(value: object, width: int = 24) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return "-"
+    text = text.split("://", 1)[-1].rstrip("/")
+    return text if len(text) <= width else text[: width - 1] + "…"
+
+
 def render_history(snapshots: list[dict[str, Any]]) -> str:
     if not snapshots:
         return "没有可用的快照。"
-    header = f"{'时间':<25} {'模型':<24} {'风险':<7} {'高/中':<7} {'通过':<9} {'中位延迟':>9}"
+    header = (
+        f"{'时间':<25} {'端点':<24} {'模型':<24} {'风险':<7} {'高/中':<7} "
+        f"{'通过':<9} {'中位延迟':>9}"
+    )
     lines = [header, "-" * len(header)]
     previous: dict[str, Any] | None = None
+    suppressed = 0
     for item in snapshots:
         summary = item.get("summary") or {}
         passed = f"{int(summary.get('passed') or 0)}/{int(summary.get('tests') or 0)}"
@@ -517,20 +539,32 @@ def render_history(snapshots: list[dict[str, Any]]) -> str:
         risk = str(item.get("risk_level", "?"))
         delta = ""
         if previous is not None:
-            if RISK_RANK.get(risk, 0) > RISK_RANK.get(str(previous.get("risk_level")), 0):
+            same_context = all(
+                str(previous.get(key, "")) == str(item.get(key, ""))
+                for key in ("base_url", "model", "probe_suite")
+            )
+            risk_delta = RISK_RANK.get(risk, 0) - RISK_RANK.get(str(previous.get("risk_level")), 0)
+            if same_context and risk_delta > 0:
                 delta = " ↑"
-            elif RISK_RANK.get(risk, 0) < RISK_RANK.get(str(previous.get("risk_level")), 0):
+            elif same_context and risk_delta < 0:
                 delta = " ↓"
+            elif risk_delta:
+                suppressed += 1
         captured = str(item.get("captured_at", ""))
         model = str(item.get("model") or "-")
+        endpoint = _short_endpoint(item.get("base_url"))
         lines.append(
             f"{captured:<25} "
+            f"{endpoint:<24} "
             f"{model:<24} "
             f"{risk + delta:<7} "
             f"{int(summary.get('high') or 0)}/{int(summary.get('medium') or 0)}   "
             f"{passed:<9} {median:>9}"
         )
         previous = item
+    if suppressed:
+        lines.append("")
+        lines.append(f"注：{suppressed} 处相邻快照的端点、模型或探针套件不同，已跳过风险箭头。")
     return "\n".join(lines)
 
 
@@ -596,6 +630,9 @@ def main(argv: list[str] | None = None) -> int:
             if not source.exists():
                 print(f"  [x] 路径不存在: {source}", file=sys.stderr)
                 return 2
+            if source.is_dir() and not any(source.glob("*.json")):
+                print(f"  [x] 目录内没有 JSON 扫描结果: {source}", file=sys.stderr)
+                return 2
             paths = _capture_paths(source, args.out)
             for path in paths:
                 print(f"  快照: {path}")
@@ -620,7 +657,11 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
             return 0
 
-        snapshots = load_history(args.directory)
+        directory = Path(args.directory)
+        if not directory.is_dir():
+            print(f"  [x] 快照目录不存在: {directory}", file=sys.stderr)
+            return 2
+        snapshots = load_history(directory)
         if args.json:
             print(json.dumps(snapshots, ensure_ascii=False, indent=2))
         else:
