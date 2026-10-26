@@ -18,6 +18,11 @@
   结论五态（`stable` / `improved` / `changed` / `regressed` / `incomparable`），
   退出码 `0/1/2` 可直接接入 CI。主程序新增 `--snapshot` / `--benchmark-dir`，
   扫描完自动留快照。说明见 `docs/benchmark.md`。
+- **趋势告警（`relay-audit-benchmark trends`）**：按 `base_url + model + probe_suite`
+  严格分组，只比较组内按时间相邻的快照；每组至少 3 份快照才出结论，最新一次回归或
+  连续 ≥2 次回归触发告警（退出码 1），已恢复的稳定历史不再持续报警。非显著翻转保留
+  `changed` 状态但不告警，模型身份漂移单独标记。`history` 的时间解析同步收紧：
+  无时区时间按 UTC 处理，同刻快照以来源与内容哈希稳定排序。
 - `--serve --no-browser`：报告浏览服务器只监听端口、不自动打开浏览器，
   适配远机 / 容器 / 计划任务等无桌面场景。
 

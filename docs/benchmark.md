@@ -20,6 +20,10 @@ relay-audit-benchmark compare ./bench/a.json ./bench/b.json --markdown diff.md
 
 # 3) 看时间线（按 captured_at 排序，跳过损坏/版本不符的文件）
 relay-audit-benchmark history ./bench
+
+# 4) 分端点/模型/探针套件检查趋势告警；任一活跃回归时退出码为 1
+relay-audit-benchmark trends ./bench
+relay-audit-benchmark trends ./bench --json > trends.json
 ```
 
 时间线表格会显示端点、模型、风险、通过数与中位延迟。风险箭头只在相邻快照的
@@ -92,6 +96,14 @@ relay-audit-benchmark history ./bench
   单独改变风险结论。
 - **可比性**：`base_url`、请求模型、`probe_suite` 任一不同即不可比；共同
   探针少于并集的一半也不可比。`--quick` 与完整扫描混比通常落在这里。
+
+## 多快照趋势告警
+
+`trends` 先按 `base_url + model + probe_suite` 严格分组，再只比较组内相邻快照。
+每组至少需要 3 份快照；不足时为 `insufficient_data`，不生成告警。最新比较为回归时
+`alert=true`，连续回归会附加 `consecutive_regressions`；已经恢复的稳定历史不会持续报警。
+非显著翻转保留 `changed` 状态但不告警，模型身份变化单独写入 `model_drift`。
+时间按 ISO 时间戳排序，无时区时间按 UTC 处理，同刻快照以来源和内容哈希稳定排序。
 
 ## 接进 CI / 定时巡检
 

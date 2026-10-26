@@ -403,6 +403,105 @@ def test_render_history_empty() -> None:
     assert benchmark.render_history([]) == "没有可用的快照。"
 
 
+def _trend_snapshot(
+    captured_at: str,
+    *,
+    risk: str = "LOW",
+    ok: bool = True,
+    base_url: str = "https://relay.example.com",
+    model: str = "gpt-4o",
+) -> dict:
+    findings = []
+    if risk != "LOW":
+        findings = [{"severity": risk.lower(), "category": "quality", "title": "趋势故障"}]
+    return _snapshot(
+        _scan(
+            [_test(f"t{i}", ok) for i in range(6)],
+            risk=risk,
+            findings=findings,
+            base_url=base_url,
+            model=model,
+        ),
+        captured_at,
+    )
+
+
+def test_trends_require_three_snapshots_before_alerting() -> None:
+    result = benchmark.analyze_history(
+        [
+            _trend_snapshot("2026-10-01T00:00:00Z"),
+            _trend_snapshot("2026-10-02T00:00:00Z", risk="HIGH"),
+        ]
+    )
+    assert result["groups"][0]["status"] == "insufficient_data"
+    assert result["groups"][0]["alert"] is False
+    assert result["groups"][0]["trend"] is None
+
+
+def test_trends_ignore_non_significant_noise() -> None:
+    snapshots = [
+        _trend_snapshot("2026-10-01T00:00:00Z"),
+        _trend_snapshot("2026-10-02T00:00:00Z"),
+        _trend_snapshot("2026-10-03T00:00:00Z"),
+    ]
+    snapshots[1]["observations"][0]["ok"] = False
+    snapshots[2]["observations"][0]["ok"] = False
+    snapshots[2]["observations"][1]["ok"] = False
+    group = benchmark.analyze_history(snapshots)["groups"][0]
+    assert group["status"] == "changed"
+    assert group["alert"] is False
+
+
+def test_trends_alert_only_for_active_regression() -> None:
+    active = benchmark.analyze_history(
+        [
+            _trend_snapshot("2026-10-01T00:00:00Z"),
+            _trend_snapshot("2026-10-02T00:00:00Z"),
+            _trend_snapshot("2026-10-03T00:00:00Z", risk="HIGH"),
+        ]
+    )
+    recovered = benchmark.analyze_history(
+        [
+            _trend_snapshot("2026-10-01T00:00:00Z"),
+            _trend_snapshot("2026-10-02T00:00:00Z", risk="MEDIUM"),
+            _trend_snapshot("2026-10-03T00:00:00Z", risk="HIGH"),
+            _trend_snapshot("2026-10-04T00:00:00Z"),
+        ]
+    )
+    assert active["alert_count"] == 1
+    assert active["groups"][0]["trend"]["alert_reasons"] == ["latest_regression"]
+    assert recovered["alert_count"] == 0
+    assert recovered["groups"][0]["trend"]["max_consecutive_regressions"] == 2
+
+
+def test_trends_isolate_endpoint_and_model_groups() -> None:
+    snapshots = [_trend_snapshot(f"2026-10-0{i}T00:00:00Z") for i in range(1, 4)]
+    snapshots.append(
+        _trend_snapshot("2026-10-03T00:00:00Z", risk="HIGH", base_url="https://other.example.com")
+    )
+    snapshots.append(_trend_snapshot("2026-10-03T00:00:00Z", risk="HIGH", model="other-model"))
+    result = benchmark.analyze_history(snapshots)
+    assert result["group_count"] == 3
+    assert result["alert_count"] == 0
+    assert sum(group["status"] == "insufficient_data" for group in result["groups"]) == 2
+
+
+def test_trends_sort_timestamps_and_same_instant_deterministically() -> None:
+    snapshots = [
+        _trend_snapshot("2026-10-03T00:00:00Z", risk="HIGH"),
+        _trend_snapshot("2026-10-01T08:00:00+08:00"),
+        _trend_snapshot("2026-10-02T00:00:00"),
+    ]
+    forward = benchmark.analyze_history(snapshots)
+    reverse = benchmark.analyze_history(list(reversed(snapshots)))
+    assert forward == reverse
+    assert forward["groups"][0]["status"] == "regressed"
+    assert [item["candidate"]["captured_at"] for item in forward["groups"][0]["comparisons"]] == [
+        "2026-10-02T00:00:00",
+        "2026-10-03T00:00:00Z",
+    ]
+
+
 # ── CLI ─────────────────────────────────────────────────────
 
 
@@ -440,6 +539,19 @@ def test_cli_compare_exit_codes_and_markdown(tmp_path: Path, capsys) -> None:
     )
     assert json.loads(capsys.readouterr().out)["verdict"] == "regressed"
     assert "纵向基准报告" in markdown.read_text(encoding="utf-8")
+
+
+def test_cli_trends_json_and_alert_exit_code(tmp_path: Path, capsys) -> None:
+    for index, risk in enumerate(("LOW", "LOW", "HIGH"), start=1):
+        snapshot = _trend_snapshot(f"2026-10-0{index}T00:00:00Z", risk=risk)
+        (tmp_path / f"{index}.json").write_text(json.dumps(snapshot), encoding="utf-8")
+
+    assert benchmark.main(["trends", str(tmp_path), "--json"]) == 1
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["alert_count"] == 1
+    assert payload["groups"][0]["snapshot_count"] == 3
+    assert benchmark.main(["trends", str(tmp_path)]) == 1
+    assert "latest_regression" in capsys.readouterr().out
 
 
 def test_cli_errors(tmp_path: Path, capsys) -> None:

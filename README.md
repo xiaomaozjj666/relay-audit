@@ -53,7 +53,7 @@ flowchart LR
 - **模型对比** — `--compare` 并排对比多个模型的真实身份与响应
 - **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到报告目录（Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`，可用环境变量 `RELAY_AUDIT_REPORTS_DIR` 覆盖；默认自动清理 7 天前的旧报告，`RELAY_AUDIT_REPORT_TTL_DAYS=0` 可关闭）。报告携带探针套件版本号，不同时间的扫描结果可复现、可对比
 - **历史报告浏览** — 内置本地 Web 服务器，在浏览器中浏览往期 HTML / JSON 扫描报告
-- **纵向基准（回归检测）** — `--snapshot` 把每次扫描固化为版本化快照；`relay-audit-benchmark compare` 对有共同探针的两次扫描做配对比较：通过→失败/失败→通过的迁移、McNemar 精确检验、风险等级与高危数量、返回模型身份漂移、延迟中位数变化，输出 `stable` / `improved` / `changed` / `regressed` / `incomparable` 五态结论，退出码可直接接入 CI
+- **纵向基准（回归检测）** — `--snapshot` 把每次扫描固化为版本化快照；`relay-audit-benchmark compare` 对有共同探针的两次扫描做配对比较：通过→失败/失败→通过的迁移、McNemar 精确检验、风险等级与高危数量、返回模型身份漂移、延迟中位数变化，输出 `stable` / `improved` / `changed` / `regressed` / `incomparable` 五态结论，退出码可直接接入 CI；`trends` 按端点 / 模型 / 探针套件分组检查历史趋势，活跃回归自动告警
 - **隐私与安全** — 报告与日志中 API Key 自动脱敏；`--save-key` 以受限权限（Linux/macOS `0o600`，Windows 经 `icacls`）保存在本地
 
 ## 技术栈
@@ -281,6 +281,9 @@ relay-audit-benchmark compare ./bench/a.json ./bench/b.json --markdown diff.md
 
 # 按时间看历史快照
 relay-audit-benchmark history ./bench
+
+# 按端点/模型/套件分组做趋势告警（任一活跃回归时退出码为 1）
+relay-audit-benchmark trends ./bench
 ```
 
 比较内容：
@@ -291,7 +294,7 @@ relay-audit-benchmark history ./bench
 - **延迟**：共同通过且有延迟的探针，比较中位数与 p95；中位数上涨 ≥ 50%（样本 ≥ 3）给出告警。
 - **可比性**：`base_url`、请求模型或探针套件版本不同，或共同探针不足一半，判 `incomparable`，不硬给好坏结论。
 
-结论与退出码：`stable` / `improved` / `changed` → `0`；`regressed` → `1`；`incomparable` 或输入错误 → `2`。完整格式、判定顺序与 CI 接法见 [docs/benchmark.md](docs/benchmark.md)。
+结论与退出码：`stable` / `improved` / `changed` → `0`；`regressed` → `1`；`incomparable` 或输入错误 → `2`。`trends` 在任一分组存在活跃回归时同样返回 `1`。完整格式、判定顺序与 CI 接法见 [docs/benchmark.md](docs/benchmark.md)。
 
 ## 项目结构
 

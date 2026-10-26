@@ -19,10 +19,12 @@
     relay-audit-benchmark capture scan.json --out ~/bench
     relay-audit-benchmark compare bench/a.json bench/b.json
     relay-audit-benchmark history ~/bench
+    relay-audit-benchmark trends ~/bench
 
 快照也可以由主程序直接写：``relay-audit --snapshot``。
 
-退出码：0 稳定 / 改善 / 有变化但证据不足；1 判定为回归；2 不可比或输入错误。
+退出码：0 稳定 / 改善 / 有变化但证据不足；1 判定为回归（``compare``）或存在活跃
+回归告警（``trends``）；2 不可比或输入错误。
 """
 
 from __future__ import annotations
@@ -31,6 +33,7 @@ import argparse
 import dataclasses
 import datetime as dt
 import hashlib
+import itertools
 import json
 import math
 import re
@@ -265,17 +268,46 @@ def save_snapshot(snapshot: dict[str, Any], out_dir: str | Path | None = None) -
     return target
 
 
+def _parse_captured_at(value: object) -> dt.datetime:
+    """解析 ISO 时间并统一到 UTC；无时区的时间按 UTC 处理。"""
+    text = str(value or "").strip()
+    if not text:
+        raise ValueError("快照缺少 captured_at")
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        parsed = dt.datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"无法解析 captured_at: {text!r}") from exc
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=dt.timezone.utc)
+    return parsed.astimezone(dt.timezone.utc)
+
+
+def _history_sort_key(item: dict[str, Any]) -> tuple[dt.datetime, str, str, str]:
+    """同刻快照按来源与规范化内容排序，结果不依赖目录或输入顺序。"""
+    canonical = json.dumps(item, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return (
+        _parse_captured_at(item.get("captured_at")),
+        str(item.get("source", "")),
+        str(item.get("source_sha256", "")),
+        canonical,
+    )
+
+
 def load_history(directory: str | Path) -> list[dict[str, Any]]:
-    """读取目录内全部快照，按时间排序（无法解析或版本不符的文件跳过）。"""
+    """读取目录内全部快照，按时间排序（损坏、时间或版本无效的文件跳过）。"""
     snapshots: list[dict[str, Any]] = []
     for path in sorted(Path(directory).glob("*.json")):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             if isinstance(payload, dict) and payload.get("snapshot_version") == SNAPSHOT_VERSION:
-                snapshots.append(_validate_snapshot(payload))
+                snapshot = _validate_snapshot(payload)
+                _parse_captured_at(snapshot.get("captured_at"))
+                snapshots.append(snapshot)
         except (OSError, ValueError, json.JSONDecodeError):
             continue
-    return sorted(snapshots, key=lambda item: str(item.get("captured_at", "")))
+    return sorted(snapshots, key=_history_sort_key)
 
 
 # ── 统计与比较 ────────────────────────────────────────────────
@@ -483,6 +515,84 @@ def compare_snapshots(baseline: dict[str, Any], candidate: dict[str, Any]) -> di
     }
 
 
+def analyze_history(snapshots: list[dict[str, Any]]) -> dict[str, Any]:
+    """按严格上下文分组分析历史；只比较同组内按时间相邻的快照。
+
+    每组至少需要三份快照才给出趋势结论。最新一次回归或历史中出现连续
+    两次回归会告警；模型漂移只单独标记，不改变告警状态。
+    """
+    grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
+    for snapshot in snapshots:
+        validated = _validate_snapshot(snapshot)
+        _parse_captured_at(validated.get("captured_at"))
+        key = (
+            str(validated.get("base_url", "")),
+            str(validated.get("model", "")),
+            str(validated.get("probe_suite", "")),
+        )
+        grouped.setdefault(key, []).append(validated)
+
+    groups: list[dict[str, Any]] = []
+    for (base_url, model, probe_suite), items in sorted(grouped.items()):
+        ordered = sorted(items, key=_history_sort_key)
+        comparisons = [
+            compare_snapshots(baseline, candidate)
+            for baseline, candidate in itertools.pairwise(ordered)
+        ]
+        latest = ordered[-1]
+        result: dict[str, Any] = {
+            "base_url": base_url,
+            "model": model,
+            "probe_suite": probe_suite,
+            "snapshot_count": len(ordered),
+            "status": "insufficient_data",
+            "alert": False,
+            "model_drift": any(item["model_drift"]["changed"] for item in comparisons),
+            "latest": {
+                "captured_at": latest.get("captured_at", ""),
+                "source": latest.get("source", ""),
+                "risk_level": latest.get("risk_level", ""),
+                "summary": dict(latest.get("summary") or {}),
+            },
+            "trend": None,
+            "comparisons": comparisons,
+        }
+        if len(ordered) >= 3:
+            regression_flags = [item["verdict"] == "regressed" for item in comparisons]
+            current_run = 0
+            max_run = 0
+            for regressed in regression_flags:
+                current_run = current_run + 1 if regressed else 0
+                max_run = max(max_run, current_run)
+            trailing_run = 0
+            for regressed in reversed(regression_flags):
+                if not regressed:
+                    break
+                trailing_run += 1
+            alert_reasons: list[str] = []
+            if regression_flags[-1]:
+                alert_reasons.append("latest_regression")
+            if trailing_run >= 2:
+                alert_reasons.append("consecutive_regressions")
+            result["status"] = comparisons[-1]["verdict"]
+            result["alert"] = bool(alert_reasons)
+            result["trend"] = {
+                "latest_verdict": comparisons[-1]["verdict"],
+                "regression_count": sum(regression_flags),
+                "consecutive_regressions": trailing_run,
+                "max_consecutive_regressions": max_run,
+                "alert_reasons": alert_reasons,
+            }
+        groups.append(result)
+
+    return {
+        "snapshot_count": len(snapshots),
+        "group_count": len(groups),
+        "alert_count": sum(1 for group in groups if group["alert"]),
+        "groups": groups,
+    }
+
+
 # ── 输出 ──────────────────────────────────────────────────────
 
 
@@ -568,6 +678,33 @@ def render_history(snapshots: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def render_trends(payload: dict[str, Any]) -> str:
+    groups = payload["groups"]
+    if not groups:
+        return "没有可用的快照。"
+    lines = [f"快照 {payload['snapshot_count']} 份，分组 {payload['group_count']} 个。"]
+    for group in groups:
+        context = (
+            f"{_short_endpoint(group['base_url'])} / {group['model'] or '-'} / "
+            f"{group['probe_suite'] or '-'}"
+        )
+        lines.append(
+            f"{context}: snapshots={group['snapshot_count']} status={group['status']} "
+            f"alert={str(group['alert']).lower()} "
+            f"model_drift={str(group['model_drift']).lower()}"
+        )
+        trend = group["trend"]
+        if trend is None:
+            lines.append("- 数据不足：至少需要 3 份同组快照，不生成趋势告警。")
+        else:
+            reasons = ", ".join(trend["alert_reasons"]) or "none"
+            lines.append(
+                f"- 最新: {trend['latest_verdict']}；回归 {trend['regression_count']} 次；"
+                f"当前连续回归 {trend['consecutive_regressions']} 次；告警原因: {reasons}"
+            )
+    return "\n".join(lines)
+
+
 # ── CLI ───────────────────────────────────────────────────────
 
 
@@ -596,6 +733,10 @@ def build_parser() -> argparse.ArgumentParser:
     history = sub.add_parser("history", help="按时间列出目录内快照")
     history.add_argument("directory", help="快照目录")
     history.add_argument("--json", action="store_true", help="输出 JSON 而不是表格")
+
+    trends = sub.add_parser("trends", help="按端点、模型和探针套件分组分析历史趋势")
+    trends.add_argument("directory", help="快照目录")
+    trends.add_argument("--json", action="store_true", help="输出 JSON 而不是文本")
     return parser
 
 
@@ -662,6 +803,13 @@ def main(argv: list[str] | None = None) -> int:
             print(f"  [x] 快照目录不存在: {directory}", file=sys.stderr)
             return 2
         snapshots = load_history(directory)
+        if args.command == "trends":
+            result = analyze_history(snapshots)
+            if args.json:
+                print(json.dumps(result, ensure_ascii=False, indent=2))
+            else:
+                print(render_trends(result))
+            return int(result["alert_count"] > 0)
         if args.json:
             print(json.dumps(snapshots, ensure_ascii=False, indent=2))
         else:
