@@ -432,7 +432,7 @@ def compare_snapshots(baseline: dict[str, Any], candidate: dict[str, Any]) -> di
         notes.append(f"新增探针 {len(added)} 项：" + "、".join(added[:6]))
     if removed:
         notes.append(f"缺失探针 {len(removed)} 项：" + "、".join(removed[:6]))
-    if not reasons and not significant and (regressed or improved):
+    if verdict == "changed" and (regressed or improved):
         notes.append(f"净变化未达显著（McNemar p={p_value:.3f}），按抖动处理。")
 
     return {

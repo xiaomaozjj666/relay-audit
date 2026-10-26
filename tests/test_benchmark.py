@@ -271,6 +271,18 @@ def test_compare_risk_regression_without_test_flips() -> None:
     assert result["notes"]
 
 
+def test_risk_regression_does_not_call_flips_noise() -> None:
+    baseline = _scan([_test(f"t{i}", True) for i in range(4)])
+    candidate = _scan(
+        [_test(f"t{i}", False) for i in range(4)],
+        risk="HIGH",
+        findings=[{"severity": "high", "category": "identity", "title": "模型偷换"}],
+    )
+    result = benchmark.compare_snapshots(_snapshot(baseline), _snapshot(candidate))
+    assert result["verdict"] == "regressed"
+    assert not any("抖动" in note for note in result["notes"])
+
+
 def test_compare_model_drift_and_latency() -> None:
     baseline = [_test(f"t{i}", True, 100, "gpt-4o") for i in range(3)]
     candidate = [_test(f"t{i}", True, 300, "gpt-3.5-turbo") for i in range(3)]
