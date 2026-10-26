@@ -52,6 +52,7 @@ HTML report produced by a full scan against the bundled mock relay — risk leve
 - **Quality** — basic chat, instruction following, multi-turn dialogue, long context, encoding consistency, mojibake detection, token-billing sanity checks; JSON mode & function calling with plain-text fallback
 - **Performance** — latency stats (p50 / jitter; p95 / p99 once enough samples), stability sampling, burst concurrency, SSE streaming with time-to-first-token (TTFT)
 - **Model comparison** — `--compare` puts several models side by side (real identity vs. advertised, response quality)
+- **Longitudinal benchmark** — `--snapshot` freezes each scan into a versioned snapshot; `relay-audit-benchmark compare` pairs two snapshots of the same endpoint/model and reports probe transitions, an exact McNemar test, risk/high-count changes, returned-model drift and median-latency changes as `stable` / `improved` / `changed` / `regressed` / `incomparable`
 
 ## Quick start
 
@@ -94,6 +95,8 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--no-html` | Skip the HTML report |
 | `--skip-safety` | Skip the safety audit entirely |
 | `--config PATH` | Load scan settings from a JSON config file |
+| `--snapshot` | Write a longitudinal benchmark snapshot after the scan |
+| `--benchmark-dir DIR` | With `--snapshot`: snapshot output directory |
 | `--timeout N` / `--samples N` | Probe tuning (defaults: 60 s / 2 samples) |
 | `--key KEY` | Pass the key directly (see shell-history note above) |
 | `--api-key-env VAR` | Read the key from a different env var (default `RELAY_API_KEY`) |
@@ -128,6 +131,19 @@ relay-audit-calibrate targets.json   # or python -m relay_audit.calibrate target
 ```
 
 See the Chinese README ("检测有效性校准") for the target-list format.
+
+### Longitudinal benchmark
+
+Calibration asks "are the verdicts correct?"; the longitudinal benchmark asks "did this endpoint/model get worse since last time?". Each scan can be frozen into a versioned snapshot and any two snapshots can be paired:
+
+```bash
+relay-audit --base-url https://api.example.com --model gpt-4o --snapshot
+relay-audit-benchmark capture scan_20261025.json --out ./bench
+relay-audit-benchmark compare ./bench/a.json ./bench/b.json --json
+relay-audit-benchmark history ./bench
+```
+
+The comparison reports pass→fail / fail→pass transitions with an exact McNemar p-value, risk-level and high-count changes (a rise is always `regressed`), returned-model drift, and median/p95 latency changes. Verdicts are `stable`, `improved`, `changed`, `regressed` (exit 1) and `incomparable` (exit 2). Full format and CI recipe: [docs/benchmark.md](docs/benchmark.md) (Chinese).
 
 Keys are redacted in all reports and logs. `--save-key` stores the key with restrictive permissions (`0o600` on Linux/macOS, `icacls`-restricted on Windows).
 

@@ -579,6 +579,12 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--skip-safety", action="store_true", help="跳过安全测试")
     ap.add_argument("--config", help="JSON 配置文件路径")
     ap.add_argument(
+        "--snapshot",
+        action="store_true",
+        help="扫描完成后写入纵向基准快照（默认 <报告目录>/benchmarks）",
+    )
+    ap.add_argument("--benchmark-dir", help="配合 --snapshot：快照输出目录")
+    ap.add_argument(
         "--save-key",
         action="store_true",
         help="将 API Key 保存到 ~/.relay_key 以便下次自动读取",
@@ -706,7 +712,18 @@ def main(argv: list[str] | None = None) -> int:
 
     config = _build_config(args)
     try:
-        ec, _, _ = execute_scan(config)
+        ec, _, result = execute_scan(config)
+        if args.snapshot and result is not None:
+            from .benchmark import capture_result
+
+            try:
+                snapshot_path = capture_result(result, args.benchmark_dir)
+                print(
+                    f"  快照: {snapshot_path}",
+                    file=sys.stderr if config.json_output else sys.stdout,
+                )
+            except Exception as e:
+                print(f"  [w] 快照写入失败: {e}", file=sys.stderr)
         return ec
     except KeyboardInterrupt:
         print("\n  [i] 已取消")

@@ -10,6 +10,14 @@
 
 ### 新增
 
+- **纵向基准（`relay-audit-benchmark`）**：新增快照固化和配对比较，回答
+  “同一端点/模型与上次比是否变坏”。`capture` 把扫描 JSON（`--json` 输出、
+  报告目录精简结构均可）归一化为版本化快照；`compare` 计算通过→失败 /
+  失败→通过的迁移与 McNemar 精确 p 值，风险等级升高或高危增加直接判回归，
+  同时报告返回模型身份漂移与延迟中位数/p95 变化；`history` 按时间列出快照。
+  结论五态（`stable` / `improved` / `changed` / `regressed` / `incomparable`），
+  退出码 `0/1/2` 可直接接入 CI。主程序新增 `--snapshot` / `--benchmark-dir`，
+  扫描完自动留快照。说明见 `docs/benchmark.md`。
 - `--serve --no-browser`：报告浏览服务器只监听端口、不自动打开浏览器，
   适配远机 / 容器 / 计划任务等无桌面场景。
 

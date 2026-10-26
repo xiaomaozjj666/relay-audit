@@ -53,6 +53,7 @@ flowchart LR
 - **模型对比** — `--compare` 并排对比多个模型的真实身份与响应
 - **报告输出** — 彩色终端报告（rich）、HTML 报告（风险等级、评分、通过率、改进建议）、JSON 输出，扫描结果自动持久化到报告目录（Windows `%LOCALAPPDATA%\relay-audit\reports`，Linux/macOS `~/.relay_audit/reports`，可用环境变量 `RELAY_AUDIT_REPORTS_DIR` 覆盖；默认自动清理 7 天前的旧报告，`RELAY_AUDIT_REPORT_TTL_DAYS=0` 可关闭）。报告携带探针套件版本号，不同时间的扫描结果可复现、可对比
 - **历史报告浏览** — 内置本地 Web 服务器，在浏览器中浏览往期 HTML / JSON 扫描报告
+- **纵向基准（回归检测）** — `--snapshot` 把每次扫描固化为版本化快照；`relay-audit-benchmark compare` 对有共同探针的两次扫描做配对比较：通过→失败/失败→通过的迁移、McNemar 精确检验、风险等级与高危数量、返回模型身份漂移、延迟中位数变化，输出 `stable` / `improved` / `changed` / `regressed` / `incomparable` 五态结论，退出码可直接接入 CI
 - **隐私与安全** — 报告与日志中 API Key 自动脱敏；`--save-key` 以受限权限（Linux/macOS `0o600`，Windows 经 `icacls`）保存在本地
 
 ## 技术栈
@@ -142,6 +143,11 @@ relay-audit --base-url https://api.example.com --output report.html
 # 启动报告浏览服务器（浏览历史扫描结果）
 relay-audit --serve 8080
 
+# 扫描并写入纵向基准快照，之后比较两次结果
+relay-audit --base-url https://api.example.com --model gpt-4o --snapshot
+relay-audit-benchmark compare ~/.relay_audit/reports/benchmarks/a.json \
+                              ~/.relay_audit/reports/benchmarks/b.json
+
 # 本地仿真中转站：安全体验完整检测流程（不花真钱、无封号风险）
 python scripts/mock_relay.py --port 8931
 relay-audit --base-url http://127.0.0.1:8931 --stream
@@ -166,6 +172,8 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--no-html` | 不生成 HTML 报告 | `false` |
 | `--skip-safety` | 跳过安全测试 | `false` |
 | `--config` | JSON 配置文件路径 | - |
+| `--snapshot` | 扫描完成后写入纵向基准快照 | `false` |
+| `--benchmark-dir` | 配合 `--snapshot`：快照输出目录 | `<报告目录>/benchmarks` |
 | `--save-key` | 保存 Key 到本地（配合 `--key` 或环境变量） | `false` |
 | `--models` / `--list-models` | 只展示模型列表，不跑测试 | `false` |
 | `--refresh-sus` | 在线刷新可疑模型名规则集并缓存本地 | `false` |
@@ -255,6 +263,36 @@ relay-audit-calibrate targets.json            # 或 python -m relay_audit.calibr
 
 退出码：`0` 判定全部与真实情况一致；`1` 存在误报/漏报；`2` 有目标扫描失败或清单无效。
 
+## 纵向基准（回归检测）
+
+校准回答“工具判断得准不准”；纵向基准回答“同一个端点、同一个模型，这次和上次比有没有变坏”。它把扫描结果固化成版本化快照，再对两份快照做配对比较：
+
+```bash
+# 扫描时直接留快照（默认 <报告目录>/benchmarks）
+relay-audit --base-url https://api.example.com --model gpt-4o --snapshot
+
+# 也可以把已有的扫描 JSON 转成快照
+relay-audit-benchmark capture scan_20261025.json --out ./bench
+
+# 比较两次结果：文本 / JSON / Markdown
+relay-audit-benchmark compare ./bench/a.json ./bench/b.json
+relay-audit-benchmark compare ./bench/a.json ./bench/b.json --json
+relay-audit-benchmark compare ./bench/a.json ./bench/b.json --markdown diff.md
+
+# 按时间看历史快照
+relay-audit-benchmark history ./bench
+```
+
+比较内容：
+
+- **探针迁移**：同一探针上次通过、这次失败（回归），反之是改善；用 McNemar 精确检验判断净变化是否超出随机抖动（p < 0.05）。
+- **风险等级**：风险等级升高或高危数量增加直接判 `regressed`，不要求统计显著。
+- **模型身份**：同一探针两次返回的 `model_ret` 不一致、或两次观测到的模型集合不同，记为模型身份漂移。
+- **延迟**：共同通过且有延迟的探针，比较中位数与 p95；中位数上涨 ≥ 50%（样本 ≥ 3）给出告警。
+- **可比性**：`base_url`、请求模型或探针套件版本不同，或共同探针不足一半，判 `incomparable`，不硬给好坏结论。
+
+结论与退出码：`stable` / `improved` / `changed` → `0`；`regressed` → `1`；`incomparable` 或输入错误 → `2`。完整格式、判定顺序与 CI 接法见 [docs/benchmark.md](docs/benchmark.md)。
+
 ## 项目结构
 
 ```
@@ -270,6 +308,7 @@ relay_audit/
 ├── client.py         # OpenAI API 异步客户端
 ├── scanner.py        # 测试编排与执行
 ├── calibrate.py      # 检测有效性校准（混淆矩阵 / 精确率 / 召回率）
+├── benchmark.py      # 纵向基准（快照 / 配对比较 / McNemar / 模型漂移）
 ├── reporter.py       # 报告生成（HTML / 终端 / JSON）
 ├── serve.py          # 报告浏览 Web 服务器
 └── data/
@@ -298,5 +337,6 @@ mypy relay_audit
 ## 文档
 
 - [English Documentation](README.en.md)
+- [纵向基准说明](docs/benchmark.md)
 - [更新日志](CHANGELOG.md)
 - [参与贡献](CONTRIBUTING.md)

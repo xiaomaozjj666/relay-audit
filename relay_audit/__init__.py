@@ -7,6 +7,8 @@
 - client: httpx 异步 API 客户端
 - scanner: 测试编排 (6大类别 20+ 项检测)
 - reporter: 报告生成 (HTML/终端/JSON)
+- calibrate: 检测有效性校准 (混淆矩阵 / 精确率 / 召回率)
+- benchmark: 纵向基准 (快照 / 配对比较 / McNemar / 模型漂移)
 - cli: 命令行入口 + 交互模式
 - serve: HTTP 报告浏览服务器
 """
