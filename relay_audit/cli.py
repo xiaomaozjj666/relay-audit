@@ -12,7 +12,7 @@ import subprocess
 import sys
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, NoReturn
 
 from . import __version__
 from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult
@@ -228,6 +228,8 @@ def _build_config(args: argparse.Namespace) -> ScanConfig:
         output=args.output,
         no_html=bool(args.no_html),
         config_file=args.config,
+        smoke=bool(getattr(args, "smoke", False)),
+        bundle_output=getattr(args, "bundle", None),
     )
 
 
@@ -240,7 +242,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
     key = os.environ.get(config.api_key_env, "") or _load_key_from_file()
     if not key:
         print("错误: API Key 未设置（通过环境变量或 --key）", file=sys.stderr)
-        return 2, "", None
+        return 14, "", None
 
     os.environ[config.api_key_env] = key
 
@@ -254,20 +256,33 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
                 "  [x] 鉴权失败：Key 无效、未开通或已被封禁（模型列表返回 401/403）",
                 file=sys.stderr,
             )
-            return 2, "", None
+            return 14, "", None
         if not ids:
-            print("  [x] 无法获取模型列表，请用 --model 手动指定", file=sys.stderr)
-            return 2, "", None
+            print("  [x] 无法获取模型列表，审计证据不足；可用 --model 手动指定", file=sys.stderr)
+            return 5, "", None
         selected = auto_select_model(ids)
         if not selected:  # pragma: no cover — 非空 ids 时 auto_select_model 总会选出模型
             print("  [x] 无法自动选择模型，请用 --model 手动指定", file=sys.stderr)
-            return 2, "", None
+            return 14, "", None
         config.model = selected[0]
         config.model_ids = ids  # 避免 run_scan 再次请求 /v1/models
         if not config.quiet:
             print(f"  [i] 自动选择模型: {selected[0]}")
 
     result = asyncio.run(run_scan(config))
+    exit_code = result.exit_code
+
+    if config.bundle_output:
+        try:
+            from .audit_bundle import export_audit_bundle
+
+            bundle_path = export_audit_bundle(
+                result, config.bundle_output, config.command, exit_code
+            )
+            print(f"  证据包: {bundle_path}", file=sys.stderr if config.json_output else sys.stdout)
+        except Exception as exc:
+            print(f"  [x] 证据包写入失败，审计无效: {exc}", file=sys.stderr)
+            return 14, "", result
 
     # 保存 JSON 结果
     try:
@@ -304,7 +319,7 @@ def execute_scan(config: ScanConfig) -> tuple[int, str, ScanResult | None]:
             except Exception:
                 print("  [!] 无法打开浏览器", file=sys.stderr)
 
-    return 1 if result.high_count else 0, report_path, result
+    return result.exit_code, report_path, result
 
 
 # ── 展示模型列表 ─────────────────────────────────────────────
@@ -316,15 +331,15 @@ def cmd_list_models(args: argparse.Namespace) -> int:
     )
     if not key:
         print("错误: API Key 未设置", file=sys.stderr)
-        return 2
+        return 14
     try:
         ids = asyncio.run(fetch_models(args.base_url, key, args.timeout or 60))
     except ModelsAuthError:
         print("  [x] 鉴权失败：Key 无效、未开通或已被封禁", file=sys.stderr)
-        return 2
+        return 14
     if not ids:
-        print("  [x] 无法获取模型列表", file=sys.stderr)
-        return 1
+        print("  [x] 无法获取模型列表，证据不足", file=sys.stderr)
+        return 5
     show_models_table(ids)
     return 0
 
@@ -532,8 +547,16 @@ def load_config(path: str) -> dict[str, Any]:
 # ── CLI ───────────────────────────────────────────────────────
 
 
+class AuditArgumentParser(argparse.ArgumentParser):
+    """参数/配置错误统一映射为 invalid_audit（14）。"""
+
+    def error(self, message: str) -> NoReturn:
+        self.print_usage(sys.stderr)
+        self.exit(14, f"{self.prog}: error: {message}\n")
+
+
 def build_parser() -> argparse.ArgumentParser:
-    ap = argparse.ArgumentParser(
+    ap = AuditArgumentParser(
         description="Relay Audit - OpenAI-compatible 中转 API 检测工具。只需提供 Key 和地址即可使用。",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""示例:
@@ -572,9 +595,15 @@ def build_parser() -> argparse.ArgumentParser:
     ap.add_argument("--samples", type=int, default=2, help="稳定性采样次数 (默认 2)")
     ap.add_argument("--compare", action="append", default=[], help="对比模型（可多次使用）")
     ap.add_argument("--quick", action="store_true", help="快速模式（跳过高级与部分安全测试）")
+    ap.add_argument("--smoke", action="store_true", help="冒烟模式（单端点前置检查 + 基础探针）")
+    ap.add_argument(
+        "--adversarial", action="store_true", help="运行本地对抗 fixture 门禁，不访问网络"
+    )
     ap.add_argument("--stream", action="store_true", help="启用流式响应测试")
     ap.add_argument("--json", action="store_true", help="输出 JSON 格式结果")
     ap.add_argument("--output", help="报告输出路径")
+    ap.add_argument("--bundle", help="导出可复核审计证据包（单 JSON）")
+    ap.add_argument("--verify-bundle", metavar="PATH", help="复核证据包哈希链与整体清单")
     ap.add_argument("--no-html", action="store_true", help="不生成 HTML 报告")
     ap.add_argument("--skip-safety", action="store_true", help="跳过安全测试")
     ap.add_argument("--config", help="JSON 配置文件路径")
@@ -637,6 +666,39 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
     args = ap.parse_args(argv)
+
+    if args.verify_bundle:
+        from .audit_bundle import verify_audit_bundle
+
+        try:
+            verification = verify_audit_bundle(args.verify_bundle)
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"  [x] 证据包无效: {exc}", file=sys.stderr)
+            return 14
+        if args.json:
+            print(json.dumps(verification, ensure_ascii=False))
+        else:
+            print(f"  证据包复核: {'通过' if verification['ok'] else '失败'}")
+            for error in verification["errors"]:
+                print(f"    - {error}")
+        return 0 if verification["ok"] else 1
+
+    if args.adversarial:
+        from .adversarial import run_fixture_suite
+
+        try:
+            suite = run_fixture_suite()
+        except (OSError, json.JSONDecodeError, ValueError) as exc:
+            print(f"  [x] 对抗 fixture 无效: {exc}", file=sys.stderr)
+            return 14
+        if args.json:
+            print(json.dumps(suite, ensure_ascii=False, indent=2))
+        else:
+            for case in suite["cases"]:
+                mark = "✓" if case["ok"] else "✗"
+                print(f"  {mark} {case['id']}: {case['actual']} (预期 {case['expected']})")
+            print(f"  对抗门禁: {suite['total'] - suite['failed']}/{suite['total']} 通过")
+        return suite["exit_code"]
 
     if args.serve is not None:
         from .serve import run_server
@@ -711,6 +773,9 @@ def main(argv: list[str] | None = None) -> int:
         return cmd_list_models(args)
 
     config = _build_config(args)
+    from .audit_bundle import sanitize_command
+
+    config.command = sanitize_command(["relay-audit", *argv])
     try:
         ec, _, result = execute_scan(config)
         if args.snapshot and result is not None:
@@ -729,8 +794,8 @@ def main(argv: list[str] | None = None) -> int:
         print("\n  [i] 已取消")
         return 130
     except Exception as e:
-        print(f"\n  [x] 扫描失败: {e}", file=sys.stderr)
-        return 1
+        print(f"\n  [x] 扫描配置或执行无效: {e}", file=sys.stderr)
+        return 14
 
 
 if __name__ == "__main__":  # pragma: no cover — 入口守卫，由 relay_audit/__main__.py 覆盖

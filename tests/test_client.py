@@ -1,12 +1,14 @@
 """Tests for relay_audit.client — ApiClient 全路径覆盖."""
 
 import asyncio
+import hashlib
 import json
 
 import httpx
 
 from relay_audit import client as client_module
 from relay_audit.client import ApiClient, _parse_chat_response
+from relay_audit.models import Verdict
 
 
 def _mk_client(handler, timeout: float = 5) -> ApiClient:
@@ -60,8 +62,9 @@ def test_parse_success() -> None:
             "usage": {"total_tokens": 10},
         },
     )
-    r = _parse_chat_response("gpt-4o", 200, resp, 1.5)
+    r = _parse_chat_response("gpt-4o", 200, resp, 1.5, "reqhash")
     assert r.ok
+    assert r.verdict is Verdict.PASS
     assert r.content == "hello"
     assert r.model_ret == "gpt-4o"
     assert r.raw_id == "chatcmpl-1"
@@ -69,6 +72,29 @@ def test_parse_success() -> None:
     assert r.usage == {"total_tokens": 10}
     assert r.latency_ms == 1500
     assert r.error == ""
+    assert r.request_sha256 == "reqhash"
+    assert r.response_sha256 == hashlib.sha256(resp.content).hexdigest()
+
+
+def test_parse_finish_reason_and_inconclusive_2xx() -> None:
+    completed = httpx.Response(
+        200,
+        json={"choices": [{"message": {"content": "ok"}, "finish_reason": "length"}]},
+    )
+    r = _parse_chat_response("m", 200, completed, 0.1)
+    assert r.verdict is Verdict.PASS
+    assert r.finish_reason == "length"
+
+    # 2xx 但没有可复核的内容，不能当作通过
+    for response in (
+        httpx.Response(200, json={"choices": []}),
+        httpx.Response(200, json={"choices": [{}]}),
+        httpx.Response(200, json={"error": {"message": "upstream"}}),
+        httpx.Response(200, text="not json {{{"),
+    ):
+        r = _parse_chat_response("m", 200, response, 0.1)
+        assert r.ok
+        assert r.verdict is Verdict.INCONCLUSIVE
 
 
 def test_parse_tool_calls() -> None:
@@ -278,24 +304,28 @@ def test_chat_http_status_error() -> None:
 
 
 def test_chat_stream_success() -> None:
+    body = (
+        b'data: {"id":"1","created":1700000000,"model":"gpt-4o",'
+        b'"choices":[{"delta":{"content":"Hel"}}]}\n\n'
+        b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
+        b'data: {"choices":[{"delta":{}}],"usage":{"total_tokens":5}}\n\n'
+        b"data: [DONE]\n\n"
+    )
+
     def handler(request):
-        body = (
-            b'data: {"id":"1","created":1700000000,"model":"gpt-4o",'
-            b'"choices":[{"delta":{"content":"Hel"}}]}\n\n'
-            b'data: {"choices":[{"delta":{"content":"lo"}}]}\n\n'
-            b'data: {"choices":[{"delta":{}}],"usage":{"total_tokens":5}}\n\n'
-            b"data: [DONE]\n\n"
-        )
         return httpx.Response(200, content=body, headers={"content-type": "text/event-stream"})
 
     r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
     assert r.ok
+    assert r.verdict is Verdict.PASS
     assert r.content == "Hello"
     assert r.streaming
     assert r.model_ret == "gpt-4o"
     assert r.raw_id == "1"
     assert r.created == 1700000000
     assert r.usage == {"total_tokens": 5}
+    assert len(r.request_sha256) == 64
+    assert r.response_sha256 == hashlib.sha256(body).hexdigest()
 
 
 def test_chat_stream_ttft() -> None:

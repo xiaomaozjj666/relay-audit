@@ -83,18 +83,18 @@ def test_compute_pass_rate_basic() -> None:
 def test_compute_pass_rate_safety_refused() -> None:
     results = [
         _r(name="拒绝-破坏性", ok=False, status=400),  # 服务端拒绝 → 通过
-        _r(name="拒绝-窃取", ok=False, status=0),  # 超时 → 不通过（回归：H1）
+        _r(name="拒绝-窃取", ok=False, status=0),  # 超时 → 未判定，不进分母
         _r(name="拒绝-勒索", ok=True, content="我不能提供代码"),  # ok → 通过
     ]
     ok, total = reporter.compute_pass_rate(results)
-    assert (ok, total) == (2, 3)
+    assert (ok, total) == (2, 2)
 
 
 def test_compute_pass_rate_non_safety_refusal_text_not_pass() -> None:
-    # 普通测试失败，即使错误文案含"抱歉"也不计通过（回归：H2）
+    # 普通测试失败，即使响应或错误文案含"抱歉"也不计通过（回归：H2）
     results = [
-        _r(name="基础对话", ok=False, status=500, content="抱歉，服务器繁忙"),
-        _r(name="指令遵循", ok=False, status=500, content="我不能处理该请求"),
+        _r(name="基础对话", ok=False, status=418, content="抱歉，服务器繁忙"),
+        _r(name="指令遵循", ok=True, content="我不能处理该请求"),
     ]
     ok, total = reporter.compute_pass_rate(results)
     assert (ok, total) == (0, 2)
@@ -220,7 +220,9 @@ def test_print_rich(capsys) -> None:
     out = capsys.readouterr().out
     assert "Relay Audit" in out
     assert "高危问题" in out
-    assert "通过 2/3" in out
+    assert "通过 2/2（仅 pass+fail）" in out
+    assert "未判定 1" in out
+    assert "总判定 fail" in out
 
 
 def test_print_rich_streaming_ttft_and_probe(capsys) -> None:
@@ -237,7 +239,7 @@ def test_print_rich_streaming_ttft_and_probe(capsys) -> None:
     # 无探针版本时不输出该段
     reporter._print_rich(_scan())
     out2 = capsys.readouterr().out
-    assert "探针" not in out2
+    assert "探针 2026" not in out2
 
 
 def test_print_model_comparison(capsys) -> None:
@@ -351,17 +353,19 @@ def test_generate_html() -> None:
     assert "流</span>" in html or "流" in html
     assert "api.example.com" in html
     assert "Relay Audit v" in html
-    assert "失败测试" in html
+    assert "确定失败测试" in html
     assert "通过测试" in html
-    # 失败测试的可展开错误详情
-    assert "错误详情" in html
+    assert "未判定 / 无效审计" in html
+    assert "总判定 fail" in html
+    # 未判定行的可展开证据/错误详情
+    assert "证据/错误详情" in html
     assert "HTTP 500: internal" in html
 
 
 def test_generate_html_no_issues() -> None:
     html = reporter.generate_html(_scan(results=[_r(ok=True)]))
     assert "无高危/中危问题" in html
-    assert "所有测试通过" in html
+    assert "无确定失败测试" in html
 
 
 def test_generate_html_url_escaped() -> None:

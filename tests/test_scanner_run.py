@@ -242,7 +242,11 @@ def test_run_scan_ping_http_error(fake) -> None:
 def test_run_scan_ping_model_swap(fake) -> None:
     fake.ping_result = _cr(ok=True, model_ret="other-model")
     result = _scan(_cfg())
-    assert any("模型偷换" in f.title and f.severity == Severity.HIGH for f in result.findings)
+    # 名称不一致只是中继 claim 异常，不能升级成“已证明模型偷换”。
+    assert any(
+        "模型名与请求不一致" in f.title and f.severity == Severity.MEDIUM for f in result.findings
+    )
+    assert not any("模型偷换" in f.title for f in result.findings)
 
 
 def test_run_scan_ping_retry_exhausted(fake) -> None:

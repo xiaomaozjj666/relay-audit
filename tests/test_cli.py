@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from relay_audit import cli
-from relay_audit.models import Finding, ScanConfig, ScanResult, Severity
+from relay_audit.models import ChatResult, Finding, ScanConfig, ScanResult, Severity
 
 
 def _scan_result(high: int = 0) -> ScanResult:
@@ -16,7 +16,20 @@ def _scan_result(high: int = 0) -> ScanResult:
     return ScanResult(
         config=ScanConfig(base_url="https://api.example.com", model="gpt-4o"),
         findings=findings,
-        results=[],
+        results=[
+            ChatResult(
+                "基础对话",
+                "gpt-4o",
+                True,
+                100,
+                200,
+                "gpt-4o",
+                "OK",
+                {},
+                "id1",
+                1700000000,
+            )
+        ],
         models=[],
         started_at="2026-01-01T00:00:00+00:00",
         duration_s=1.0,
@@ -309,7 +322,7 @@ def test_cmd_list_models_ok(monkeypatch, capsys) -> None:
 def test_cmd_list_models_no_key(monkeypatch) -> None:
     monkeypatch.setattr(cli.os, "environ", {})
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
-    assert cli.cmd_list_models(cli.build_parser().parse_args(["--base-url", "https://x"])) == 2
+    assert cli.cmd_list_models(cli.build_parser().parse_args(["--base-url", "https://x"])) == 14
 
 
 def test_cmd_list_models_empty(monkeypatch, capsys) -> None:
@@ -318,7 +331,7 @@ def test_cmd_list_models_empty(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(cli, "fetch_models", fake_fetch)
     monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk"})
-    assert cli.cmd_list_models(cli.build_parser().parse_args(["--base-url", "https://x"])) == 1
+    assert cli.cmd_list_models(cli.build_parser().parse_args(["--base-url", "https://x"])) == 5
     assert "无法获取模型列表" in capsys.readouterr().err
 
 
@@ -329,7 +342,7 @@ def test_execute_scan_no_key(monkeypatch) -> None:
     monkeypatch.setattr(cli.os, "environ", {})
     monkeypatch.setattr(cli, "_load_key_from_file", lambda: "")
     cfg = ScanConfig(base_url="https://x")
-    assert cli.execute_scan(cfg) == (2, "", None)
+    assert cli.execute_scan(cfg) == (14, "", None)
 
 
 def test_execute_scan_no_models(monkeypatch, capsys) -> None:
@@ -339,8 +352,8 @@ def test_execute_scan_no_models(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "fetch_models", fake_fetch)
     monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk"})
     cfg = ScanConfig(base_url="https://x")
-    assert cli.execute_scan(cfg) == (2, "", None)
-    assert "无法获取模型列表" in capsys.readouterr().err
+    assert cli.execute_scan(cfg) == (5, "", None)
+    assert "审计证据不足" in capsys.readouterr().err
 
 
 def test_execute_scan_full_flow(monkeypatch, capsys) -> None:
@@ -390,6 +403,37 @@ def test_execute_scan_high_exit_code(monkeypatch) -> None:
     cfg = ScanConfig(base_url="https://x", model="m", json_output=True)
     ec, _, _ = cli.execute_scan(cfg)
     assert ec == 1
+
+
+def test_execute_scan_inconclusive_exit_code(monkeypatch) -> None:
+    """服务端 5xx 没测成：进程退出码 5，不再冒充通过或确定失败。"""
+
+    async def fake_run_scan(cfg):
+        result = _scan_result()
+        result.results = [
+            ChatResult(
+                "基础对话",
+                "gpt-4o",
+                False,
+                100,
+                500,
+                "",
+                "",
+                {},
+                "",
+                0,
+                "HTTP 500",
+            )
+        ]
+        return result
+
+    monkeypatch.setattr(cli, "run_scan", fake_run_scan)
+    monkeypatch.setattr("relay_audit.serve.persist_result", lambda *a, **k: None)
+    monkeypatch.setattr(cli, "save_report", lambda *a, **k: "")
+    monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk"})
+    cfg = ScanConfig(base_url="https://x", model="m", json_output=True)
+    ec, _, _ = cli.execute_scan(cfg)
+    assert ec == 5
 
 
 def test_execute_scan_json_output(monkeypatch, capsys) -> None:
@@ -1052,7 +1096,7 @@ def test_execute_scan_models_auth_error(monkeypatch, capsys) -> None:
     monkeypatch.setattr(cli, "fetch_models", auth_boom)
     monkeypatch.setattr(cli.os, "environ", {"RELAY_API_KEY": "sk-x"})
     config = cli.ScanConfig(base_url="https://x", model="")
-    assert cli.execute_scan(config) == (2, "", None)
+    assert cli.execute_scan(config) == (14, "", None)
     assert "鉴权失败" in capsys.readouterr().err
 
 
@@ -1062,7 +1106,7 @@ def test_cmd_list_models_auth_error(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(cli, "fetch_models", auth_boom)
     args = cli.build_parser().parse_args(["--base-url", "https://x", "--models"])
-    assert cli.cmd_list_models(args) == 2
+    assert cli.cmd_list_models(args) == 14
     assert "鉴权失败" in capsys.readouterr().err
 
 
@@ -1198,7 +1242,7 @@ def test_main_execute_scan_error(monkeypatch) -> None:
         raise RuntimeError("scan exploded")
 
     monkeypatch.setattr(cli, "execute_scan", boom)
-    assert cli.main(["--base-url", "https://x"]) == 1
+    assert cli.main(["--base-url", "https://x"]) == 14
 
 
 def test_main_execute_scan_interrupt(monkeypatch) -> None:
@@ -1212,14 +1256,14 @@ def test_main_execute_scan_interrupt(monkeypatch) -> None:
 def test_main_missing_base_url(monkeypatch) -> None:
     with pytest.raises(SystemExit) as e:
         cli.main(["--json"])
-    assert e.value.code == 2
+    assert e.value.code == 14
 
 
 def test_main_invalid_base_url(monkeypatch) -> None:
-    """--base-url 不带 http(s) 前缀 → 参数错误。"""
+    """--base-url 不带 http(s) 前缀 → invalid_audit。"""
     with pytest.raises(SystemExit) as e:
         cli.main(["--base-url", "ftp://x", "--json"])
-    assert e.value.code == 2
+    assert e.value.code == 14
 
 
 def test_main_argv_none_uses_sys_argv(monkeypatch) -> None:

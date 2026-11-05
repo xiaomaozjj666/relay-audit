@@ -42,12 +42,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest]
-        python-version: ['3.10', '3.11', '3.12', '3.13', '3.14']
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
         include:
           # 工具重度面向 Windows 使用场景（.bat 入口/icacls 权限/报告目录
           # 在 %LOCALAPPDATA%），补一个 Windows 验证点
           - os: windows-latest
-            python-version: '3.12'
+            python-version: "3.12"
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     steps:
@@ -68,3 +68,6 @@ jobs:
       - name: Run tests
         if: matrix.os != 'ubuntu-latest' || matrix.python-version != '3.12'
         run: pytest -q
+      - name: Adversarial false-acceptance gate
+        # 独立门禁：作恶样本被放过或诚实样本被误判都会使 CI 失败。
+        run: pytest tests/test_adversarial.py -q

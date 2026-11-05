@@ -7,7 +7,7 @@ import time
 from typing import Any
 
 from relay_audit import patterns
-from relay_audit.models import ChatResult, Finding, ModelInfo, Severity
+from relay_audit.models import ChatResult, Finding, ModelInfo, Severity, Verdict
 from relay_audit.patterns import (
     DANGER_PATTERNS,
     KNOWN_FAMILIES,
@@ -214,13 +214,20 @@ def analyze_error_pattern(results: list[ChatResult]) -> list[Finding]:
         most_common = max(error_msgs.items(), key=lambda x: x[1])
         if most_common[1] >= len(failed) * 0.8 and most_common[1] >= 3:
             err_sample = most_common[0][:150]
+            if all(r.verdict is Verdict.INVALID_AUDIT for r in failed):
+                error_verdict = Verdict.INVALID_AUDIT
+            elif all(r.verdict is Verdict.INCONCLUSIVE for r in failed):
+                error_verdict = Verdict.INCONCLUSIVE
+            else:
+                error_verdict = Verdict.FAIL
             fs.append(
                 Finding(
                     Severity.HIGH,
                     "大量测试返回相同错误 — 中转站可能异常",
                     f"{most_common[1]}/{len(failed)} 项测试返回同类型错误: {err_sample}",
                     "quality",
-                    "中转站对所有请求返回相同错误，不兼容或配置错误",
+                    "错误证据按四态来源汇总，不把超时或 5xx 直接判为 fail",
+                    verdict=error_verdict,
                 )
             )
 
@@ -438,12 +445,39 @@ def analyze_chat(result: ChatResult, kind: str = "quality") -> list[Finding]:
                 f"测试失败: {result.name}",
                 f"HTTP {result.status}: {short(result.error or result.content, 300)}",
                 "quality",
-                "API 返回了错误状态码",
+                "传输或服务端错误不等于确定的质量失败",
+                verdict=result.verdict,
             )
         )
         return fs
+    if result.verdict in (Verdict.INCONCLUSIVE, Verdict.INVALID_AUDIT):
+        return fs
 
-    # 模型名不一致
+    # 确定性探针必须给出指定答案；注水、敷衍或篡改均可本地复核。
+    if result.name == "基础对话":
+        normalized = result.content.strip().strip("`*_ .。").upper()
+        if normalized != "OK":
+            fs.append(
+                Finding(
+                    Severity.HIGH,
+                    "基础探针答案被注水或篡改",
+                    short(result.content, 200),
+                    "quality",
+                    "请求要求只输出 OK，实际响应不符合确定性答案",
+                )
+            )
+    if result.name == "指令遵循" and "ZX9-OK!!" not in result.content:
+        fs.append(
+            Finding(
+                Severity.HIGH,
+                "确定性指令未遵循",
+                short(result.content, 200),
+                "quality",
+                "响应缺少审计探针要求的 ZX9-OK!! 标记",
+            )
+        )
+
+    # 模型名不一致仅记录 claim 异常，不能单独证明真实模型被替换。
     if result.model_ret and result.model_ret != result.model_req:
         fs.append(
             Finding(

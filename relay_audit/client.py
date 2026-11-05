@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import dataclasses
+import hashlib
 import json
 import time
 from typing import Any
@@ -11,7 +12,7 @@ from typing import Any
 import httpx
 from typing_extensions import Self
 
-from .models import ChatResult
+from .models import ChatResult, Verdict
 
 # 单请求响应体大小上限（字节）：防御恶意中转站以超长响应拖垮扫描进程
 _MAX_RESPONSE_BYTES = 10 * 1024 * 1024
@@ -215,28 +216,37 @@ def _apply_stream_payload(payload: str, state: _StreamState, t0: float) -> None:
 
 
 def _parse_chat_response(
-    model: str, status: int, response: httpx.Response, lat: float
+    model: str,
+    status: int,
+    response: httpx.Response,
+    lat: float,
+    request_sha256: str = "",
 ) -> ChatResult:
-    """解析 /v1/chat/completions 响应"""
+    """解析聊天响应；2xx 但无可用 choices 时证据不足而非通过。"""
     content = ""
     model_ret = ""
     usage: dict = {}
     raw_id = ""
     created = 0
+    finish_reason = ""
     try:
         parsed = response.json() if response.text else {}
     except (json.JSONDecodeError, ValueError):
         parsed = {}
+    choices = parsed.get("choices") if isinstance(parsed, dict) else None
+    first: dict[str, Any] = {}
+    if isinstance(choices, list) and choices and isinstance(choices[0], dict):
+        first = choices[0]
+    error_field = parsed.get("error") if isinstance(parsed, dict) else None
     if isinstance(parsed, dict):
         model_ret = parsed.get("model", "") or ""
         usage_raw = parsed.get("usage") or {}
-        # usage 数值字段落袋前安全化：恶意中转站的字符串 token 数不得透传下游
         usage = _sanitize_usage(usage_raw) if isinstance(usage_raw, dict) else {}
         raw_id = parsed.get("id", "") or ""
         created = _safe_int(parsed.get("created") or 0)
-        choices = parsed.get("choices")
-        if isinstance(choices, list) and choices:
-            msg = choices[0].get("message", {}) if isinstance(choices[0], dict) else {}
+        if first:
+            finish_reason = str(first.get("finish_reason") or "")
+            msg = first.get("message", {})
             if isinstance(msg, dict):
                 content = str(msg.get("content", "") or "")
                 if msg.get("tool_calls") and not content:
@@ -247,10 +257,12 @@ def _parse_chat_response(
                 content = json.dumps(err, ensure_ascii=False)
             elif not isinstance(err, dict) and err:
                 content = str(err)
+    success = 200 <= status < 300
+    usable = bool(content.strip()) and not error_field
     return ChatResult(
         "",
         model,
-        200 <= status < 300,
+        success,
         int(lat * 1000),
         status,
         model_ret,
@@ -258,7 +270,11 @@ def _parse_chat_response(
         usage,
         raw_id,
         created,
-        "" if 200 <= status < 300 else f"HTTP {status}",
+        "" if success else f"HTTP {status}",
+        verdict=Verdict.INCONCLUSIVE if success and not usable else "",
+        request_sha256=request_sha256,
+        response_sha256=hashlib.sha256(response.content).hexdigest(),
+        finish_reason=finish_reason,
     )
 
 
@@ -335,6 +351,7 @@ class ApiClient:
         timeout = request_timeout or self.timeout
         path = "/v1/chat/completions"
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        request_sha256 = hashlib.sha256(data).hexdigest()
         max_retries = 2 if retry else 0
 
         for attempt in range(max_retries + 1):
@@ -364,7 +381,7 @@ class ApiClient:
                         0,
                         oversize,
                     )
-                return _parse_chat_response(model, r.status_code, r, lat)
+                return _parse_chat_response(model, r.status_code, r, lat, request_sha256)
             except (TimeoutError, asyncio.TimeoutError, httpx.TimeoutException):
                 lat = time.perf_counter() - t0
                 # 超时不重试 — 中转站慢就是慢
@@ -400,7 +417,9 @@ class ApiClient:
                         0,
                         oversize,
                     )
-                return _parse_chat_response(model, e.response.status_code, e.response, lat)
+                return _parse_chat_response(
+                    model, e.response.status_code, e.response, lat, request_sha256
+                )
             except Exception as e:
                 lat = time.perf_counter() - t0
                 return ChatResult("", model, False, int(lat * 1000), 0, "", "", {}, "", 0, repr(e))
@@ -437,6 +456,8 @@ class ApiClient:
             "stream": True,
         }
         data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        request_sha256 = hashlib.sha256(data).hexdigest()
+        response_hasher = hashlib.sha256()
         t0 = time.perf_counter()
         timeout = request_timeout or self.timeout
         state = _StreamState()
@@ -473,6 +494,7 @@ class ApiClient:
                     )
                 acc = _SseAccumulator()
                 async for raw_line in r.aiter_lines():
+                    response_hasher.update(raw_line.encode("utf-8") + b"\n")
                     received += len(raw_line) + 1
                     if received > _MAX_RESPONSE_BYTES:
                         # 停止读取：恶意超长流不应拖垮扫描进程
@@ -538,6 +560,14 @@ class ApiClient:
             "; ".join(notes),
             streaming=True,
             ttft_ms=state.first_tok_ms,
+            verdict=(
+                Verdict.INCONCLUSIVE
+                if 200 <= status < 300 and not notes and not content.strip()
+                else ""
+            ),
+            request_sha256=request_sha256,
+            response_sha256=response_hasher.hexdigest(),
+            finish_reason=state.finish_reason,
         )
 
     async def list_models(self) -> tuple[int, list[dict], dict, float, dict[str, str]]:

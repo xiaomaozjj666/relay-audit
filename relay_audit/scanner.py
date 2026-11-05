@@ -19,7 +19,7 @@ from .analysis import (
     analyze_stability,
 )
 from .client import ApiClient
-from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity
+from .models import ChatResult, Finding, ModelInfo, ScanConfig, ScanResult, Severity, Verdict
 from .patterns import register_secret_keys, short
 
 
@@ -308,6 +308,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         f"/v1/models 返回 HTTP {status}",
                         "security",
                         "Key 无效、未开通或已被封禁，请确认后重试",
+                        verdict=Verdict.INVALID_AUDIT,
                     )
                 )
             else:
@@ -332,6 +333,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     f"前置检查返回 HTTP {ping.status}",
                     "security",
                     "Key 无效、未开通或已被封禁，请确认后重试",
+                    verdict=Verdict.INVALID_AUDIT,
                 )
             )
             duration = time.perf_counter() - t0_all
@@ -352,19 +354,20 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     f"基础文字请求失败: HTTP {ping.status}: {short(ping.error or ping.content, 200)}",
                     "quality",
                     "API 连最简单的文字请求都无法正常响应",
+                    verdict=ping.verdict,
                 )
             )
         else:
             _log(f"   健康检查通过 ({ping.latency_ms}ms)")
-            # 如果返回的模型名与请求不一致，标记模型偷换
+            # model_ret 只是中继 claim；名称不一致不是已验证的模型替换。
             if ping.model_ret and ping.model_ret != config.model and config.model:
                 findings.append(
                     Finding(
-                        Severity.HIGH,
-                        "模型偷换 — 基础请求返回不同模型",
-                        f"请求={config.model}, 返回={ping.model_ret}",
+                        Severity.MEDIUM,
+                        "返回模型名与请求不一致（claim）",
+                        f"请求={config.model}, 自称={ping.model_ret}",
                         "identity",
-                        "中转站将请求路由到了不同的模型",
+                        "仅记录名称差异；需行为探针或厂商参考数据进一步验证",
                     )
                 )
 
@@ -380,6 +383,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         ping.error[:200],
                         "quality",
                         "前置检查超时，可能网络较慢，继续执行后续测试",
+                        verdict=Verdict.INCONCLUSIVE,
                     )
                 )
             else:
@@ -391,6 +395,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                         ping.error[:200],
                         "quality",
                         "中转站完全不可用，无法进行任何测试",
+                        verdict=Verdict.INCONCLUSIVE,
                     )
                 )
                 duration = time.perf_counter() - t0_all
@@ -407,8 +412,8 @@ async def run_scan(config: ScanConfig) -> ScanResult:
         # ──────────────────────────────────────────────────────
         # [3] 构建测试队列（全部并发执行）
         # ──────────────────────────────────────────────────────
-        mt2 = 60 if config.quick else 200
-        tout = 6 if config.quick else 15  # 单请求超时（缩短以加速）
+        mt2 = 60 if config.quick or config.smoke else 200
+        tout = 6 if config.quick or config.smoke else 15  # 单请求超时（缩短以加速）
 
         # ── 基础测试（纯文本，所有模型都应支持） ──
         test_queue: list[TestCase] = [
@@ -524,7 +529,12 @@ async def run_scan(config: ScanConfig) -> ScanResult:
         # 流式测试由下方独立的 chat_stream 块处理，不放入 adv_queue
         # (避免 _run_with_fallback 以非流式方式重复发送同名请求)
 
-        run_advanced = not config.quick
+        if config.smoke:
+            # 冒烟只保留可本地复核的确定性探针，避免把波动当成结论。
+            test_queue = [tc for tc in test_queue if tc.name in ("基础对话", "指令遵循")]
+            adv_queue = []
+
+        run_advanced = not config.quick and not config.smoke
         run_count = len(test_queue) + (len(adv_queue) if run_advanced else 0)
         _log(
             f"  [i] 发起 {run_count} 项测试 ({len(test_queue)} 基础"
@@ -598,7 +608,7 @@ async def run_scan(config: ScanConfig) -> ScanResult:
 
         # ── 构建全部任务队列（主测试 + 稳定性 + 突发 + 对比，共享信号量） ──
         all_tasks: list[Any] = [_run_with_fallback(t) for t in test_queue]
-        if not config.quick:
+        if not config.quick and not config.smoke:
             all_tasks += [_run_with_fallback(t) for t in adv_queue]
 
         # 稳定性采样（quick 模式跳过）
@@ -749,19 +759,20 @@ async def run_scan(config: ScanConfig) -> ScanResult:
                     ]
 
         # 把稳定性/突发/对比任务加入队列
-        if not config.quick:
+        if not config.quick and not config.smoke:
             for i in range(max(0, config.samples)):
                 all_tasks.append(_run_stability(i + 1))
             all_tasks.append(_run_burst())
-        for cm in config.compare:
-            if cm:
-                all_tasks.append(_run_compare(cm))
+        if not config.smoke:
+            for cm in config.compare:
+                if cm:
+                    all_tasks.append(_run_compare(cm))
 
         # ── 一次性并发执行所有任务 ──
         chat_results: list[Any] = await asyncio.gather(*all_tasks, return_exceptions=True)
 
         # 流式测试（单独处理 — chat_stream 不同于 chat，不走 _sem）
-        if config.stream:
+        if config.stream and not config.smoke:
             try:
                 sr = await client.chat_stream(
                     config.model,

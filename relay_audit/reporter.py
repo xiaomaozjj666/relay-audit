@@ -10,7 +10,7 @@ import sys
 from typing import Any
 
 from relay_audit import REPORTS_DIR
-from relay_audit.models import ChatResult, Finding, ScanResult
+from relay_audit.models import ChatResult, Finding, ScanResult, Verdict
 from relay_audit.patterns import (
     CAT_CN,
     DIAGNOSTIC_PREFIXES,
@@ -54,12 +54,14 @@ def _is_refused_by_pattern(r: ChatResult) -> bool:
 
 
 def compute_pass_rate(results: list[ChatResult]) -> tuple[int, int]:
-    """计算通过率 (effective_ok, total)，诊断测试不计入分母。
+    """通过率只统计有结论的 pass/fail。
 
-    普通测试中的模型拒答不算通过；只有安全测试的拒答属于预期结果。
-    展示层与 JSON 均复用 ChatResult.outcome/passed，避免口径分裂。
+    诊断项、inconclusive 与 invalid_audit 均排除分母并独立计数；
+    普通探针拒答是 fail，只有安全探针的预期拒答是 pass。
     """
-    graded = [r for r in results if not _is_diagnostic(r)]
+    graded = [
+        r for r in results if not _is_diagnostic(r) and r.verdict in (Verdict.PASS, Verdict.FAIL)
+    ]
     return sum(1 for r in graded if r.passed), len(graded)
 
 
@@ -109,7 +111,8 @@ def _print_plain(result: ScanResult) -> None:
     print(
         f"  耗时 {result.duration_s:.0f}s | 测试 {len(result.results)} 项 | "
         f"高危 {result.high_count} 中危 {result.med_count} 低危 {result.low_count} | "
-        f"延迟 {avg:.0f}ms | {avg_tps} tok/s  | 风险 {result.risk_level}"
+        f"延迟 {avg:.0f}ms | {avg_tps} tok/s  | 风险 {result.risk_level} | "
+        f"总判定 {result.verdict.value}"
     )
 
 
@@ -188,21 +191,28 @@ def _print_rich(result: ScanResult) -> None:
     else:
         console.print("[green]✓[/] 未发现异常")
 
-    rt = Table(box=box.SIMPLE, title="测试明细", title_style="bold")
+    rt = Table(box=box.SIMPLE, title="测试明细（claim 与 verified 分列）", title_style="bold")
     rt.add_column("项目", min_width=14)
-    rt.add_column("结果", width=6, justify="center")
+    rt.add_column("verified", width=12, justify="center")
     rt.add_column("延迟", width=12, justify="right")
     rt.add_column("tok/s", width=7, justify="right")
     rt.add_column("请求模型", max_width=20)
-    rt.add_column("返回模型", max_width=20)
+    rt.add_column("claim 自称模型", max_width=20)
+    rt.add_column("名称比对", width=8)
 
     for r in result.results:
-        if r.outcome == "refused":
+        if r.verdict is Verdict.INCONCLUSIVE:
+            ok_cls = "[yellow]? 未判定[/]"
+        elif r.verdict is Verdict.INVALID_AUDIT:
+            ok_cls = "[magenta]! 无效[/]"
+        elif r.outcome == "refused":
             ok_cls = "[yellow]拒[/]" if r.passed else "[red]拒[/]"
         elif r.passed:
-            ok_cls = "[green]✓[/]"
+            ok_cls = "[green]✓ 通过[/]"
         else:
-            ok_cls = "[red]✗[/]"
+            ok_cls = "[red]✗ 失败[/]"
+        consistent = r.verified["model_name_consistent"]
+        consistent_s = "-" if consistent is None else ("一致" if consistent else "不一致")
         tps_s = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
         lat_color = "red" if r.latency_ms > 3000 else "yellow" if r.latency_ms > 1000 else ""
         lat_s = f"[{lat_color}]{r.latency_ms}ms[/]" if lat_color else f"{r.latency_ms}ms"
@@ -216,12 +226,18 @@ def _print_rich(result: ScanResult) -> None:
             tps_s,
             f"[dim]{escape(r.model_req)}[/]",
             f"[dim]{escape(r.model_ret or '-')}[/]",
+            consistent_s,
         )
     console.print(rt)
     probe_s = f"  |  探针 {result.probe_suite}" if result.probe_suite else ""
+    counts = result.verdict_counts
     console.print(
         f"  [dim]延迟 avg={avg:.0f}ms max={mx}ms  |  {avg_tps:.1f} tok/s  |  "
-        f"通过 {effective_ok}/{total}{probe_s}[/]"
+        f"通过 {effective_ok}/{total}（仅 pass+fail） | 总判定 {result.verdict.value} | "
+        f"未判定 {counts['inconclusive']} 无效 {counts['invalid_audit']}{probe_s}[/]"
+    )
+    console.print(
+        "  [dim]claim 来自中继自称；verified 来自本地探针，名称比对不是身份密码学证明。[/]"
     )
     console.print()
 
@@ -419,18 +435,26 @@ def generate_html(result: ScanResult) -> str:
 
     fail_tests = []
     ok_tests = []
+    pending_tests = []
     for r in result.results:
-        if r.outcome == "refused":
+        if r.verdict is Verdict.INCONCLUSIVE:
+            s_tag, s_cls, row_cls = "未判定", "inconclusive", "pending"
+        elif r.verdict is Verdict.INVALID_AUDIT:
+            s_tag, s_cls, row_cls = "无效审计", "invalid", "pending"
+        elif r.outcome == "refused":
             s_tag, s_cls = "拒答", "refused"
             row_cls = "ok" if r.passed else "fail"
         elif r.passed:
             s_tag, s_cls, row_cls = "通过", "ok", "ok"
         else:
             s_tag, s_cls, row_cls = "失败", "fail", "fail"
+        row = (r, s_tag, s_cls, row_cls)
         if row_cls == "fail":
-            fail_tests.append((r, s_tag, s_cls, row_cls))
+            fail_tests.append(row)
+        elif row_cls == "pending":
+            pending_tests.append(row)
         else:
-            ok_tests.append((r, s_tag, s_cls, row_cls))
+            ok_tests.append(row)
 
     def _test_row(r: ChatResult, s_tag: str, s_cls: str, row_cls: str) -> str:
         st = " <span class='stream-tag'>流</span>" if r.streaming else ""
@@ -451,9 +475,9 @@ def generate_html(result: ScanResult) -> str:
         )
         preview = _response_preview(r.content, 80)
         err_detail = ""
-        if row_cls == "fail" and r.error:
+        if row_cls in ("fail", "pending") and r.error:
             err_detail = (
-                f'<details class="err-detail"><summary>错误详情</summary>'
+                f'<details class="err-detail"><summary>证据/错误详情</summary>'
                 f"<code>{esc(r.error)}</code></details>"
             )
         tps = f"{r.tokens_per_second:.1f}" if r.tokens_per_second else "-"
@@ -472,8 +496,10 @@ def generate_html(result: ScanResult) -> str:
 
     rrows_fail = "".join(_test_row(r, s, c, rc) for r, s, c, rc in fail_tests)
     rrows_ok = "".join(_test_row(r, s, c, rc) for r, s, c, rc in ok_tests)
+    rrows_pending = "".join(_test_row(r, s, c, rc) for r, s, c, rc in pending_tests)
     fail_count = len(fail_tests)
     ok_count = len(ok_tests)
+    pending_count = len(pending_tests)
 
     sd = result.started_at[:19].replace("T", " ") if result.started_at else "-"
     probe_html = f" · 探针套件 {esc(result.probe_suite)}" if result.probe_suite else ""
@@ -639,6 +665,7 @@ details[open] summary::before {{ transform: rotate(90deg) }}
 .sev-low td:first-child {{ border-left: 3px solid var(--blue) }}
 .sev-info td:first-child {{ border-left: 3px solid #94a3b8 }}
 .t-fail td {{ background: #fef2f2 }}
+.t-pending td {{ background: #fffbeb }}
 .finding-title {{ font-weight: 600; font-size: 12px; margin-bottom: 1px }}
 .finding-detail {{ font-size: 11px; color: var(--muted) }}
 .model-tag {{
@@ -682,6 +709,8 @@ details[open] summary::before {{ transform: rotate(90deg) }}
 .s-ok {{ color: var(--green); font-weight: 700; font-size: 11px }}
 .s-fail {{ color: var(--red); font-weight: 700; font-size: 11px }}
 .s-refused {{ color: #94a3b8; font-weight: 700; font-size: 11px }}
+.s-inconclusive {{ color: var(--amber); font-weight: 700; font-size: 11px }}
+.s-invalid {{ color: #7c3aed; font-weight: 700; font-size: 11px }}
 .stream-tag {{
   display: inline-block;
   background: #dbeafe;
@@ -771,8 +800,8 @@ details[open] summary::before {{ transform: rotate(90deg) }}
     <div class="score-label">评分</div>
   </div>
   <div class="pass-info">
-    <div class="pass-label">通过率</div>
-    <div class="pass-value">{pass_rate} ({pass_rate_pct}%)</div>
+    <div class="pass-label">通过率（仅 pass+fail；未判定/无效另计）</div>
+    <div class="pass-value">{pass_rate} ({pass_rate_pct}%) · 总判定 {esc(result.verdict.value)}</div>
     <div class="pass-bar-sm"><div class="pass-fill-sm" style="width:{pass_rate_pct}%"></div></div>
   </div>
   <div class="meta-line">
@@ -789,6 +818,8 @@ details[open] summary::before {{ transform: rotate(90deg) }}
     <span class="stat-pill stat-pill-ok"><span class="stat-pill-num">{effective_ok}/{total}</span> 通过</span>
   </div>
 
+  <div class="pass-label">未判定 {result.verdict_counts["inconclusive"]} · 无效审计 {result.verdict_counts["invalid_audit"]}</div>
+  <div class="pass-label">参考来源：本地审计配置、中继 /v1/models（仅 claim）、确定性本地探针比对（verified）；不构成模型身份的密码学证明。</div>
   {rec_html}
 </div>
 
@@ -799,9 +830,10 @@ details[open] summary::before {{ transform: rotate(90deg) }}
 </div>
 
 <div class="card">
-  <h2>失败测试 <span class="count">{fail_count}</span></h2>
-  {f'<table class="tb"><thead><tr><th>项目</th><th style="width:42px">结果</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>响应预览</th><th style="width:100px">返回模型</th></tr></thead><tbody>{rrows_fail}</tbody></table>' if rrows_fail else '<div class="no-issues" style="color:var(--green);padding:12px">✓ 所有测试通过</div>'}
-  {f'<details><summary>通过测试 ({ok_count})</summary><table class="tb" style="margin-top:8px"><thead><tr><th>项目</th><th style="width:42px">结果</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>响应预览</th><th style="width:100px">返回模型</th></tr></thead><tbody>{rrows_ok}</tbody></table></details>' if rrows_ok else ""}
+  <h2>确定失败测试（verified） <span class="count">{fail_count}</span></h2>
+  {f'<table class="tb"><thead><tr><th>项目</th><th style="width:70px">verified</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>响应预览</th><th style="width:100px">claim 自称模型</th></tr></thead><tbody>{rrows_fail}</tbody></table>' if rrows_fail else '<div class="no-issues" style="color:var(--green);padding:12px">✓ 无确定失败测试</div>'}
+  {f'<details><summary>通过测试 ({ok_count})</summary><table class="tb" style="margin-top:8px"><thead><tr><th>项目</th><th style="width:70px">verified</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>响应预览</th><th style="width:100px">claim 自称模型</th></tr></thead><tbody>{rrows_ok}</tbody></table></details>' if rrows_ok else ""}
+  {f'<details open><summary>未判定 / 无效审计（不计入通过率分母） ({pending_count})</summary><table class="tb" style="margin-top:8px"><thead><tr><th>项目</th><th style="width:70px">verified</th><th style="width:90px">延迟</th><th style="width:50px">tok/s</th><th>证据</th><th style="width:100px">claim 自称模型</th></tr></thead><tbody>{rrows_pending}</tbody></table></details>' if rrows_pending else ""}
 </div>
 
 <div class="footer">Relay Audit v{esc(result.version)}{probe_html} · {esc(sd)}</div>

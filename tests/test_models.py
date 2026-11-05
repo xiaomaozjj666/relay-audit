@@ -8,6 +8,7 @@ from relay_audit.models import (
     ScanConfig,
     ScanResult,
     Severity,
+    Verdict,
 )
 
 
@@ -40,6 +41,8 @@ def test_finding_defaults() -> None:
     assert f.category == "general"
     assert f.reason == ""
     assert f.model_name == ""
+    assert f.verdict is Verdict.FAIL
+    assert Finding(Severity.LOW, "标题", "详情", verdict="pass").verdict is Verdict.PASS
 
 
 def test_chat_result_tokens_per_second() -> None:
@@ -140,23 +143,34 @@ def test_scan_result_to_dict() -> None:
     assert d["model"] == "gpt-4o"
     assert d["duration_s"] == 12.5
     assert d["risk_level"] == "HIGH"
+    assert d["verdict"] == "fail"
+    assert d["exit_code"] == 1
     assert d["summary"] == {
         "high": 1,
         "medium": 0,
         "low": 0,
         "total": 1,
         "tests": 2,
+        "verdicts": {"pass": 1, "fail": 0, "inconclusive": 1, "invalid_audit": 0},
+        "pass_rate_denominator": "pass+fail（排除诊断、inconclusive、invalid_audit）",
     }
+    assert d["reference_sources"]["model_list"] == "relay_/v1/models_claim_only"
     # 脱敏
     assert "sk-abc123" not in d["findings"][0]["detail"]
     assert "[REDACTED]" in d["findings"][0]["detail"]
     assert d["findings"][0]["severity"] == "high"
     assert d["findings"][0]["category"] == "identity"
     assert d["findings"][0]["model_name"] == "gpt-4o"
+    assert d["findings"][0]["verdict"] == "fail"
 
     t = d["tests"][0]
     assert t["name"] == "t"
     assert t["ok"] is True
+    assert t["verdict"] == "pass"
+    assert t["claim"]["model"] == "gpt-4o"
+    assert t["claim"]["id"] == "id1"
+    assert t["verified"]["verdict"] == "pass"
+    assert t["verified"]["model_name_consistent"] is True
     assert t["status"] == 200
     assert t["latency_ms"] == 1000
     assert t["ttft_ms"] == 120  # 流式结果携带首字延迟
@@ -170,9 +184,45 @@ def test_scan_result_to_dict() -> None:
     # 失败测试携带脱敏后的 error
     t2 = d["tests"][1]
     assert t2["ok"] is False
+    assert t2["verdict"] == "inconclusive"
     assert t2["ttft_ms"] is None  # 非流式无 TTFT
     assert "sk-abcdefghijklmnop123456" not in t2["error"]
     assert "[REDACTED]" in t2["error"]
+
+
+def test_scan_result_verdict_priority_and_exit_codes() -> None:
+    cfg = ScanConfig(base_url="https://x")
+    passing = _result()
+    failing = _result(ok=False, status=418)
+    inconclusive = _result(ok=False, status=500)
+    invalid = _result(ok=False, status=401)
+
+    empty = ScanResult(cfg, [], [], [], "", 1.0)
+    assert empty.verdict is Verdict.INCONCLUSIVE
+    assert empty.exit_code == 5
+
+    ok = ScanResult(cfg, [], [passing], [], "", 1.0)
+    assert ok.verdict is Verdict.PASS
+    assert ok.exit_code == 0
+
+    bad = ScanResult(cfg, [], [passing, failing], [], "", 1.0)
+    assert bad.verdict is Verdict.FAIL
+    assert bad.exit_code == 1
+    assert bad.verdict_counts == {"pass": 1, "fail": 1, "inconclusive": 0, "invalid_audit": 0}
+
+    unusable = ScanResult(cfg, [], [passing, invalid], [], "", 1.0)
+    assert unusable.verdict is Verdict.INVALID_AUDIT
+    assert unusable.exit_code == 14
+
+    pending = ScanResult(cfg, [], [passing, inconclusive], [], "", 1.0)
+    assert pending.verdict is Verdict.INCONCLUSIVE
+    assert pending.exit_code == 5
+
+    # 只有高危及以上的确定失败发现才盖过通过结果；中危发现单独存在不改总判定。
+    high = Finding(Severity.HIGH, "高危", "d")
+    assert ScanResult(cfg, [high], [passing], [], "", 1.0).verdict is Verdict.FAIL
+    medium = Finding(Severity.MEDIUM, "中危", "d")
+    assert ScanResult(cfg, [medium], [passing], [], "", 1.0).verdict is Verdict.PASS
 
 
 def test_tokens_per_second_poisoned_fields() -> None:
@@ -191,6 +241,7 @@ def test_tokens_per_second_poisoned_fields() -> None:
 
 def test_chat_result_outcome_distinguishes_normal_and_safety_refusals() -> None:
     normal = _result(name="基础对话", ok=True, content="我不能提供这个内容")
+    assert normal.verdict is Verdict.FAIL
     assert normal.outcome == "refused"
     assert not normal.passed
 
@@ -203,9 +254,47 @@ def test_chat_result_outcome_distinguishes_normal_and_safety_refusals() -> None:
     assert server_refused.outcome == "refused"
     assert server_refused.passed
 
-    failed = _result(name="基础对话", ok=False, status=500, content="")
+    failed = _result(name="基础对话", ok=False, status=418, content="")
+    assert failed.verdict is Verdict.FAIL
     assert failed.outcome == "failed"
     assert not failed.passed
+
+    incomplete = _result(name="基础对话", ok=False, status=500, content="")
+    assert incomplete.verdict is Verdict.INCONCLUSIVE
+    assert incomplete.outcome == "inconclusive"
+    assert not incomplete.passed
+
+
+def test_chat_result_verdict_inference() -> None:
+    assert _result(ok=False, status=400).verdict is Verdict.INVALID_AUDIT
+    assert _result(ok=False, status=401).verdict is Verdict.INVALID_AUDIT
+    assert _result(ok=False, status=429).verdict is Verdict.INCONCLUSIVE
+    assert _result(ok=False, status=0, error="timeout>5s").verdict is Verdict.INCONCLUSIVE
+    assert _result(ok=False, status=200, error="流未正常终止").verdict is Verdict.INCONCLUSIVE
+    assert _result(ok=False, status=418).verdict is Verdict.FAIL
+    assert _result(name="拒绝-破坏性", ok=False, status=403).verdict is Verdict.PASS
+
+
+def test_chat_result_claim_and_verified_are_separate() -> None:
+    r = _result()
+    assert r.claim == {
+        "model": "gpt-4o",
+        "id": "id1",
+        "created": 1700000000,
+        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+    }
+    assert r.verified["verdict"] == "pass"
+    assert r.verified["response_received"] is True
+    assert r.verified["model_name_consistent"] is True
+    assert r.verified["source"] == "local_probe_comparison"
+
+    mismatch = _result(model_ret="gpt-4o-mini")
+    assert mismatch.verified["model_name_consistent"] is False
+
+    no_response = _result(ok=False, status=500, model_ret="gpt-4o")
+    assert no_response.verified["response_received"] is True
+    assert no_response.verified["model_name_consistent"] is None
+    assert _result(ok=False, status=0).verified["response_received"] is False
 
 
 def test_scan_result_to_dict_sanitizes_url_and_marks_normal_refusal_failed() -> None:
