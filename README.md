@@ -76,6 +76,30 @@ python -m pip install -e .
 
 也可直接从 PyPI 安装：`pip install relay-audit`。
 
+### 可信审计分级 route
+
+按成本从低到高执行；每级都可直接用退出码接入自动化。`--adversarial` 验证审计器本身，不访问网络。
+
+```bash
+# 1) 冒烟：单端点，前置检查 + 基础对话 + 指令遵循
+relay-audit --base-url https://api.example.com --model gpt-4o --smoke --no-html
+# 预期关键输出：前置检查、基础对话、指令遵循；全部 pass 时退出码 0。
+
+# 2) 标准：完整行为审计，同时导出可复核证据包
+relay-audit --base-url https://api.example.com --model gpt-4o --bundle audit-bundle.json
+# 预期关键输出：测试明细、报告路径、证据包路径；verdict 决定退出码。
+
+# 复核证据包（离线）
+relay-audit --verify-bundle audit-bundle.json
+# 预期输出：证据包复核: 通过；退出码 0。篡改、结构不符或 schema 不支持返回 1，文件缺失/JSON 非法返回 14。
+
+# 3) 对抗：内置作恶与诚实 fixture 的 false-acceptance 门禁
+relay-audit --adversarial
+# 预期末行：对抗门禁: 11/11 通过；退出码 0。false acceptance / 误报返回 3。
+```
+
+四态判定为 `pass / fail / inconclusive / invalid_audit`。通过率分母仅含 `pass+fail`，超时、限流、截断等未判定项独立计数。`claim` 记录中继自称，`verified` 记录本地探针结论；名称一致性不是密码学身份证明。完整边界见 [LIMITS.md](LIMITS.md)，agent 执行纪律见 [AGENTS.md](AGENTS.md)。
+
 ### 最简用法
 
 设置环境变量后直接运行（自动选择最强模型）：
@@ -106,9 +130,11 @@ Windows 下也可直接运行仓库中的 `relay_audit.bat`。
 
 | 退出码 | 含义 |
 |--------|------|
-| `0` | 扫描完成，未发现高危问题 |
-| `1` | 扫描完成，发现高危问题 |
-| `2` | 参数或 API Key 错误 |
+| `0` | 全部有效探针均为 `pass` |
+| `1` | 存在确定 `fail`（含高危确定异常） |
+| `3` | 对抗 fixture 出现 false acceptance、误报或期望不一致 |
+| `5` | 无 `fail`，但存在 `inconclusive`；未判定不进入通过率分母 |
+| `14` | `invalid_audit`：参数、Key、调用或证据包写入无效 |
 | `130` | 用户取消（Ctrl+C） |
 
 > 扫描过程实时输出每项测试的进度（`✓` / `✗` + 延迟），长扫描无需干等。
@@ -166,9 +192,13 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--samples` | 稳定性采样次数 | 2 |
 | `--compare` | 对比模型（可多次使用） | - |
 | `--quick` | 快速模式（跳过部分高级测试） | `false` |
+| `--smoke` | 冒烟模式（前置检查 + 确定性基础探针） | `false` |
+| `--adversarial` | 运行本地对抗 fixture 门禁 | `false` |
 | `--stream` | 启用流式响应测试 | `false` |
 | `--json` | 输出 JSON 格式结果 | `false` |
 | `--output` | 报告输出路径 | 自动生成 |
+| `--bundle` | 导出带哈希链的单 JSON 证据包 | - |
+| `--verify-bundle` | 复核证据包配置指纹、哈希链与 manifest | - |
 | `--no-html` | 不生成 HTML 报告 | `false` |
 | `--skip-safety` | 跳过安全测试 | `false` |
 | `--config` | JSON 配置文件路径 | - |

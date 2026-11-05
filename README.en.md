@@ -81,6 +81,30 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 
 > **Passing the key on the command line** (`--key ...`) is convenient but the value lands in your shell history. Prefer the `RELAY_API_KEY` environment variable or the interactive prompt; `--save-key` persists it locally with restrictive permissions instead.
 
+### Trustworthy audit levels
+
+Run from cheapest to most expensive; every level plugs into CI through its exit code. `--adversarial` validates the auditor itself and makes no network calls.
+
+```bash
+# 1) Smoke: one endpoint, preflight + basic chat + instruction following
+relay-audit --base-url https://api.example.com --model gpt-4o --smoke --no-html
+# Expected probes: preflight, basic chat, instruction following; exit 0 when all pass.
+
+# 2) Standard: full behavioural audit with a verifiable evidence bundle
+relay-audit --base-url https://api.example.com --model gpt-4o --bundle audit-bundle.json
+# Key output: per-test detail, report path, bundle path; the overall verdict sets the exit code.
+
+# Verify the bundle offline
+relay-audit --verify-bundle audit-bundle.json
+# Expected "证据包复核: 通过" and exit 0. Tampering, structural mismatch or an unsupported schema returns 1; a missing file or invalid JSON returns 14.
+
+# 3) Adversarial: false-acceptance gate over the bundled malicious and honest fixtures
+relay-audit --adversarial
+# Expected final line "对抗门禁: 11/11 通过" and exit 0. False acceptance or a false alarm returns 3.
+```
+
+The four-state verdict is `pass / fail / inconclusive / invalid_audit`. The pass-rate denominator covers only `pass+fail`; timeouts, rate limits and truncation are counted separately as undetermined. `claim` records what the relay says about itself while `verified` records local probe conclusions — a matching model name is not cryptographic proof of identity. Full boundaries: [LIMITS.md](LIMITS.md); agent execution rules: [AGENTS.md](AGENTS.md).
+
 ## CLI reference
 
 | Flag | Effect |
@@ -89,6 +113,10 @@ relay-audit --base-url http://127.0.0.1:8931 --stream
 | `--model NAME` | Audit one specific model (omit to auto-pick the strongest) |
 | `--compare MODEL` | Add a model to the side-by-side comparison (repeatable) |
 | `--quick` | Fast mode — skips advanced and some safety probes |
+| `--smoke` | Minimal route: preflight + basic chat + instruction following only |
+| `--bundle PATH` | Write a verifiable audit evidence bundle |
+| `--verify-bundle PATH` | Verify a bundle offline (no network); exit 0/1/14 |
+| `--adversarial` | Run the bundled false-acceptance fixtures without network access |
 | `--stream` | Include SSE streaming + TTFT probes |
 | `--json` | Print JSON instead of the terminal report |
 | `--output PATH` | Report output path |
@@ -153,9 +181,11 @@ Keys are redacted in all reports and logs. `--save-key` stores the key with rest
 
 | Code | Meaning |
 |------|---------|
-| `0` | Scan finished, no high-severity issues |
-| `1` | Scan finished, high-severity issues found |
-| `2` | Bad arguments or missing API key |
+| `0` | All valid probes `pass` |
+| `1` | A definite `fail` exists (including confirmed high-severity anomalies) |
+| `3` | Adversarial fixtures hit false acceptance, a false alarm, or an expectation mismatch |
+| `5` | No `fail`, but an `inconclusive` exists; undetermined probes stay out of the pass-rate denominator |
+| `14` | `invalid_audit`: invalid arguments, key, call, or bundle write |
 | `130` | Cancelled by user (Ctrl+C) |
 
 ## Development

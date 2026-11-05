@@ -37,3 +37,5 @@ coverage.xml
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
+# 项目级 agent 执行纪律必须入库，覆盖用户全局忽略规则
+!AGENTS.md
