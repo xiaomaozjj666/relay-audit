@@ -222,7 +222,8 @@ def test_print_rich(capsys) -> None:
     assert "高危问题" in out
     assert "通过 2/2（仅 pass+fail）" in out
     assert "未判定 1" in out
-    assert "总判定 fail" in out
+    # rich 会按终端宽度折行，断言前先压平空白，避免 CI 与本地宽度不同。
+    assert "总判定 fail" in " ".join(out.split())
 
 
 def test_print_rich_streaming_ttft_and_probe(capsys) -> None:
