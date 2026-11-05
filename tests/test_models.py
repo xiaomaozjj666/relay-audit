@@ -187,3 +187,38 @@ def test_tokens_per_second_poisoned_fields() -> None:
     r = _result(usage={"total_tokens": "999"})
     d = ScanResult(ScanConfig(base_url="https://x"), [], [r], [], "", 1.0).to_dict()
     assert d["tests"][0]["tokens_per_second"] == 0.0
+
+
+def test_chat_result_outcome_distinguishes_normal_and_safety_refusals() -> None:
+    normal = _result(name="基础对话", ok=True, content="我不能提供这个内容")
+    assert normal.outcome == "refused"
+    assert not normal.passed
+
+    safety = _result(name="拒绝-破坏性", ok=True, content="我不能提供这个内容")
+    assert safety.outcome == "refused"
+    assert safety.passed
+
+    server_refused = _result(name="拒绝-破坏性", ok=False, status=403, content="")
+    assert server_refused.safety_refused
+    assert server_refused.outcome == "refused"
+    assert server_refused.passed
+
+    failed = _result(name="基础对话", ok=False, status=500, content="")
+    assert failed.outcome == "failed"
+    assert not failed.passed
+
+
+def test_scan_result_to_dict_sanitizes_url_and_marks_normal_refusal_failed() -> None:
+    cfg = ScanConfig(
+        base_url="https://user:password@api.example.com/v1?api_key=top-secret#fragment"
+    )
+    refusal = _result(name="基础对话", ok=True, content="我不能提供这个内容")
+    data = ScanResult(cfg, [], [refusal], [], "", 1.0).to_dict()
+
+    assert data["base_url"] == "https://api.example.com/v1"
+    assert "password" not in str(data)
+    assert "top-secret" not in str(data)
+    # ok 保留传输语义；outcome/passed 才表示测试判定，普通拒答不算通过。
+    assert data["tests"][0]["ok"] is True
+    assert data["tests"][0]["outcome"] == "refused"
+    assert data["tests"][0]["passed"] is False

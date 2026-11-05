@@ -206,15 +206,15 @@ def test_stream_multiline_data_event() -> None:
 
 
 def test_stream_truncated_without_done() -> None:
-    """M2-3：截断流（无 [DONE] 无 finish_reason）→ error 打「流未正常终止」告警。"""
+    """截断流（无 [DONE] 无 finish_reason）必须失败，不能只附加告警。"""
 
     def handler(request):
         body = b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
         return httpx.Response(200, content=body)
 
     r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
-    assert r.ok  # 2xx 仍判通过，但携带告警标记
-    assert r.content == "partial"  # content 保持原样
+    assert not r.ok
+    assert r.content == "partial"  # 部分内容保留用于诊断
     assert "流未正常终止" in r.error
 
 
@@ -226,6 +226,7 @@ def test_stream_finish_reason_counts_as_termination() -> None:
         return httpx.Response(200, content=body)
 
     r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
+    assert r.ok
     assert r.content == "ok"
     assert r.error == ""
 
@@ -385,7 +386,7 @@ def test_extract_error_body_unit() -> None:
 
 
 def test_stream_response_size_cap(monkeypatch) -> None:
-    """L5：超长流式响应 → 停止读取、部分内容保留、error 注明超限截断。"""
+    """L5：超长流式响应 → 停止读取、部分内容保留并明确失败。"""
     monkeypatch.setattr(client_module, "_MAX_RESPONSE_BYTES", 1024)
 
     def handler(request):
@@ -394,7 +395,7 @@ def test_stream_response_size_cap(monkeypatch) -> None:
         return httpx.Response(200, content=body)
 
     r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
-    assert r.ok  # 已收到的内容仍在
+    assert not r.ok
     assert 0 < len(r.content) < 40 * 41  # 明显少于全量（提前停止读取）
     assert "响应超限" in r.error
 
@@ -416,7 +417,7 @@ def test_chat_content_length_precap() -> None:
 
 
 def test_chat_oversized_body_postcap() -> None:
-    """L5：头缺失时读入后兜底检查 body 大小超限 → 拒绝解析。"""
+    """L5：头缺失时按分块累计值拒绝，不再先读取完整 11MB body。"""
 
     def handler(request):
         big = b'{"padding":"' + b"a" * (11 * 1024 * 1024) + b'"}'
@@ -425,6 +426,51 @@ def test_chat_oversized_body_postcap() -> None:
     r = _run(_mk_client(handler).chat("m", [{"role": "user", "content": "hi"}]))
     assert not r.ok
     assert "响应体超限" in r.error
+
+
+def test_chat_without_content_length_stops_reading_at_cap(monkeypatch) -> None:
+    """回归：非流式请求必须流式消费 body，超限块之后的数据不得再读取。"""
+    monkeypatch.setattr(client_module, "_MAX_RESPONSE_BYTES", 32)
+    consumed: list[bytes] = []
+
+    class StreamingResponse:
+        status_code = 200
+        is_closed = False
+
+        def __init__(self):
+            self.headers: dict[str, str] = {}
+            self.request = httpx.Request("POST", "https://fake.test/v1/chat/completions")
+
+        @property
+        def content(self):
+            raise AssertionError("流式响应不得通过 .content 整体读取")
+
+        async def aiter_bytes(self):
+            for chunk in (b"a" * 16, b"b" * 17, b"c" * 16):
+                consumed.append(chunk)
+                yield chunk
+
+    class StreamContext:
+        async def __aenter__(self):
+            return StreamingResponse()
+
+        async def __aexit__(self, *args):
+            return None
+
+    class StreamingClient:
+        def stream(self, *args, **kwargs):
+            return StreamContext()
+
+    client = ApiClient.__new__(ApiClient)
+    client.base = "https://fake.test"
+    client.headers = {}
+    client.timeout = 1
+    client._client = StreamingClient()
+
+    result = _run(client.chat("m", []))
+    assert not result.ok
+    assert "响应体超限" in result.error
+    assert len(consumed) == 2  # 第三个 16 字节块没有被消费
 
 
 def test_list_models_oversize() -> None:

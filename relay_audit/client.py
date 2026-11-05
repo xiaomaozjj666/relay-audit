@@ -59,14 +59,15 @@ def _oversize_error(response: httpx.Response) -> str | None:
     declared = response.headers.get("content-length", "")
     if declared.isdigit() and int(declared) > _MAX_RESPONSE_BYTES:
         return f"响应体超限（Content-Length {declared} > {_MAX_RESPONSE_BYTES}）"
-    # 头缺失/不实时兜底：body 虽已读入，仍阻断后续 JSON 解析的内存放大
-    if len(response.content) > _MAX_RESPONSE_BYTES:
+    # 已加载响应（如 HTTPStatusError 或单元测试）保留实测兜底；流式响应
+    # 尚未读取时不能访问 .content，由 _read_capped 在累积读取中检查。
+    if response.is_closed and len(response.content) > _MAX_RESPONSE_BYTES:
         return f"响应体超限（{len(response.content)} > {_MAX_RESPONSE_BYTES}）"
     return None
 
 
 async def _read_capped(response: httpx.Response) -> tuple[bytes, bool]:
-    """读取响应体，累计不超过 _MAX_RESPONSE_BYTES；返回 (已读字节, 是否超限截断)。"""
+    """分块读取响应体，累计超限时立即中断；返回 (已读字节, 是否超限)。"""
     chunks: list[bytes] = []
     total = 0
     truncated = False
@@ -77,6 +78,35 @@ async def _read_capped(response: httpx.Response) -> tuple[bytes, bool]:
             break
         chunks.append(chunk)
     return b"".join(chunks), truncated
+
+
+async def _request_capped(
+    client: httpx.AsyncClient,
+    method: str,
+    path: str,
+    *,
+    content: bytes | None = None,
+) -> tuple[httpx.Response, str | None]:
+    """发送非 SSE 请求并以流式方式读取响应，避免超限 body 先完整占满内存。
+
+    返回已关闭原始流后构造的有界内存响应，调用方仍可复用既有 JSON 解析逻辑。
+    Content-Length 预检命中时完全不消费 body；头缺失或撒谎时由累计字节数兜底。
+    """
+    async with client.stream(method, path, content=content) as response:
+        oversize = _oversize_error(response)
+        if oversize:
+            raw = b""
+        else:
+            raw, truncated = await _read_capped(response)
+            if truncated:
+                oversize = f"响应体超限（>{_MAX_RESPONSE_BYTES} 字节）"
+        buffered = httpx.Response(
+            response.status_code,
+            headers=response.headers,
+            content=raw,
+            request=response.request,
+        )
+        return buffered, oversize
 
 
 def _extract_error_body(raw: bytes) -> str:
@@ -309,8 +339,8 @@ class ApiClient:
 
         for attempt in range(max_retries + 1):
             try:
-                r = await asyncio.wait_for(
-                    self._client.request("POST", path, content=data),
+                r, oversize = await asyncio.wait_for(
+                    _request_capped(self._client, "POST", path, content=data),
                     timeout=timeout,
                 )
                 lat = time.perf_counter() - t0
@@ -320,7 +350,6 @@ class ApiClient:
                     await asyncio.sleep(0.5 * (2**attempt))
                     continue
                 # 响应体超限：不解析直接拒绝（防御恶意超长响应）
-                oversize = _oversize_error(r)
                 if oversize:
                     return ChatResult(
                         "",
@@ -498,7 +527,7 @@ class ApiClient:
         return ChatResult(
             "",
             model,
-            200 <= status < 300,
+            200 <= status < 300 and not notes,
             int(lat * 1000),
             status,
             state.model_ret,
@@ -516,10 +545,9 @@ class ApiClient:
         assert self._client is not None
         t0 = time.perf_counter()
         try:
-            r = await self._client.get("/v1/models")
+            r, oversize = await _request_capped(self._client, "GET", "/v1/models")
             lat = time.perf_counter() - t0
             # 响应体超限：不解析直接拒绝（防御恶意超长模型列表）
-            oversize = _oversize_error(r)
             if oversize:
                 return r.status_code, [], {"error": oversize}, lat, {}
             parsed = r.json() if r.text else {}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Iterable
+from urllib.parse import urlsplit, urlunsplit
 
 from relay_audit import susdata
 
@@ -65,6 +66,21 @@ def redact(text: str, extra_keys: Iterable[str] = ()) -> str:
     for p in SENSITIVE_PATTERNS:
         text = p.sub("[REDACTED]", text)
     return text
+
+
+def redact_url(url: str) -> str:
+    """脱敏 URL：移除 query/fragment/userinfo，并对保留部分做密钥脱敏。"""
+    # 先去掉查询与片段，即使畸形 URL 导致 urlsplit 失败也不会泄露密钥参数。
+    without_secrets = url.split("#", 1)[0].split("?", 1)[0]
+    try:
+        parts = urlsplit(without_secrets)
+    except ValueError:
+        return redact(without_secrets)
+    if not parts.scheme or not parts.netloc:
+        return redact(without_secrets)
+    # rpartition 同时覆盖 user:password@host 与仅 username@host，保留主机和端口。
+    netloc = parts.netloc.rpartition("@")[2]
+    return redact(urlunsplit((parts.scheme, netloc, parts.path, "", "")))
 
 
 def short(text: str, n: int = 500) -> str:

@@ -38,6 +38,46 @@ def test_safe_path() -> None:
     assert serve._safe_path("") == ""
 
 
+@pytest.mark.parametrize(
+    "host",
+    [
+        "localhost",
+        "localhost:8080",
+        "LOCALHOST:65535",
+        "127.0.0.1",
+        "127.0.0.1:80",
+        "[::1]",
+        "[::1]:8080",
+    ],
+)
+def test_host_allowlist_accepts_local_variants(host: str) -> None:
+    assert serve._is_allowed_host(host)
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "",
+        "evil.com",
+        "localhost.evil.com",
+        "127.0.0.1.evil.com",
+        "localhost@evil.com",
+        "evil@localhost",
+        "::1",
+        "[::2]",
+        "localhost:0",
+        "localhost:65536",
+        "localhost:http",
+        "localhost:",
+        " localhost",
+        "localhost ",
+        "127.0.0.1:80:90",
+    ],
+)
+def test_host_allowlist_rejects_spoofing_and_malformed_values(host: str) -> None:
+    assert not serve._is_allowed_host(host)
+
+
 def test_resolve_inside(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path)
     (tmp_path / "ok.html").write_text("x")
@@ -92,9 +132,30 @@ def test_persist_result_redacts_and_hashes(tmp_path, monkeypatch) -> None:
     raw = json.dumps(data, ensure_ascii=False)
     assert "sk-abcdefghijklmnop123456" not in raw
     assert "[REDACTED]" in raw
-    assert data["base_url"] == "https://api.example.com?x=1&y=2"
+    assert data["base_url"] == "https://api.example.com"
+    assert "x=1" not in raw and "y=2" not in raw
     assert data["summary"]["risk_level"] == "HIGH"
     assert data["summary"]["tests_total"] == 1
+    assert data["results"][0]["outcome"] == "passed"
+    assert data["results"][0]["passed"] is True
+
+
+def test_persist_result_normal_refusal_is_not_passed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path)
+    result = _scan_result(
+        results=[
+            ChatResult(
+                "基础对话", "gpt-4o", True, 100, 200, "gpt-4o", "我不能提供这个内容", {}, "", 0
+            )
+        ]
+    )
+    path = serve.persist_result(result, result.config.base_url)
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+
+    assert data["summary"]["tests_passed"] == 0
+    assert data["results"][0]["ok"] is True
+    assert data["results"][0]["outcome"] == "refused"
+    assert data["results"][0]["passed"] is False
 
 
 def test_persist_result_distinct_urls(tmp_path, monkeypatch) -> None:
@@ -272,6 +333,27 @@ def test_list_json_reports_escapes_injected_fields(tmp_path, monkeypatch) -> Non
     assert reports[0]["file"] == "scan_20260101_000000_abc.json"
 
 
+def test_list_json_reports_escapes_risk_level(tmp_path, monkeypatch) -> None:
+    """risk_level 同时进入文本和 class 属性，必须在 JSON API 下发前转义。"""
+    monkeypatch.setattr(serve, "REPORTS_DIR", tmp_path)
+    payload = 'HIGH"><img src=x onerror=alert(1)>'
+    (tmp_path / "scan_20260101_000000_abc.json").write_text(
+        json.dumps(
+            {
+                "timestamp": "20260101_000000",
+                "base_url": "https://x",
+                "summary": {"risk_level": payload},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    risk = serve.list_json_reports()[0]["risk_level"]
+    assert payload not in risk
+    assert "<img" not in risk
+    assert risk == "HIGH&quot;&gt;&lt;img src=x onerror=alert(1)&gt;"
+
+
 # ── 缓存 ───────────────────────────────────────────────────
 
 
@@ -333,14 +415,37 @@ def http_server(tmp_path, monkeypatch):
     thread.join(timeout=5)
 
 
-def _get(port: int, path: str) -> tuple[int, bytes]:
+def _request(
+    port: int, path: str, method: str = "GET", host: str | None = None
+) -> tuple[int, bytes]:
     conn = http.client.HTTPConnection("127.0.0.1", port, timeout=5)
     try:
-        conn.request("GET", path)
+        headers = {"Host": host} if host is not None else {}
+        conn.request(method, path, headers=headers)
         resp = conn.getresponse()
         return resp.status, resp.read()
     finally:
         conn.close()
+
+
+def _get(port: int, path: str) -> tuple[int, bytes]:
+    return _request(port, path)
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_server_rejects_untrusted_host(http_server, method: str) -> None:
+    port, _ = http_server
+    status, body = _request(port, "/", method=method, host="evil-rebinding.example")
+    assert status == 403
+    if method == "GET":
+        assert b"Invalid Host header" in body
+
+
+def test_server_head_allows_local_host(http_server) -> None:
+    port, _ = http_server
+    status, body = _request(port, "/", method="HEAD")
+    assert status == 200
+    assert body == b""
 
 
 def test_server_index(http_server) -> None:

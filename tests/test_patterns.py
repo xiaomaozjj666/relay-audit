@@ -41,6 +41,23 @@ def test_redact() -> None:
     assert redact("sk-abc") == "sk-abc"
 
 
+def test_redact_url_removes_credentials_query_and_fragment() -> None:
+    from relay_audit.patterns import redact_url
+
+    url = "https://user:password@api.example.com:8443/v1?api_key=top-secret#fragment"
+    assert redact_url(url) == "https://api.example.com:8443/v1"
+    assert "password" not in redact_url(url)
+    assert "top-secret" not in redact_url(url)
+
+
+def test_redact_url_handles_relative_and_malformed_urls() -> None:
+    from relay_audit.patterns import redact_url
+
+    assert redact_url("api.example.com/v1?token=secret") == "api.example.com/v1"
+    # 畸形 IPv6 触发 urlsplit ValueError，query 仍须先被移除且不得抛异常。
+    assert redact_url("https://[::1?token=secret") == "https://[::1"
+
+
 def test_short() -> None:
     assert short("hello") == "hello"
     assert short("word " * 30, 20) == ("word " * 30)[:20] + "..."

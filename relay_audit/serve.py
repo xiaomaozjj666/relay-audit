@@ -18,7 +18,23 @@ from typing import Any
 from urllib.parse import unquote
 
 from relay_audit import REPORTS_DIR
-from relay_audit.patterns import redact
+from relay_audit.patterns import redact, redact_url
+
+_ALLOWED_HOSTS = re.compile(
+    r"^(?:(?:localhost|127\.0\.0\.1)(?::(\d{1,5}))?|\[::1\](?::(\d{1,5}))?)$",
+    re.IGNORECASE,
+)
+
+
+def _is_allowed_host(host: str) -> bool:
+    """仅接受本机 Host（可选数字端口），阻断 DNS rebinding 与宿主头伪装。"""
+    if not host or host != host.strip():
+        return False
+    match = _ALLOWED_HOSTS.fullmatch(host)
+    if not match:
+        return False
+    port = match.group(1) or match.group(2)
+    return port is None or 1 <= int(port) <= 65535
 
 
 def _safe_path(name: str) -> str:
@@ -59,13 +75,13 @@ def persist_result(result: Any, base_url: str) -> str:
 
     data = {
         "timestamp": ts,
-        "base_url": redact(base_url),
+        "base_url": redact_url(base_url),
         "probe_suite": result.probe_suite,
         "summary": {
             "risk_level": result.risk_level,
             "high_count": result.high_count,
             "total_findings": len(result.findings),
-            "tests_passed": sum(1 for r in result.results if r.ok),
+            "tests_passed": sum(1 for r in result.results if r.passed),
             "tests_total": len(result.results),
         },
         "findings": [
@@ -81,6 +97,8 @@ def persist_result(result: Any, base_url: str) -> str:
             {
                 "name": r.name,
                 "ok": r.ok,
+                "outcome": r.outcome,
+                "passed": r.passed,
                 "latency_ms": r.latency_ms,
                 "ttft_ms": r.ttft_ms or None,
                 "status": r.status,
@@ -120,7 +138,9 @@ def list_json_reports() -> list[dict]:
                     "timestamp": htmlmod.escape(_fmt_ts(data.get("timestamp", ""))),
                     "mtime": f.stat().st_mtime,
                     "base_url": htmlmod.escape(data.get("base_url", "") or ""),
-                    "risk_level": data.get("summary", {}).get("risk_level", ""),
+                    "risk_level": htmlmod.escape(
+                        str(data.get("summary", {}).get("risk_level", "") or "")
+                    ),
                     "findings": data.get("summary", {}).get("total_findings", 0),
                     "tests_passed": data.get("summary", {}).get("tests_passed", 0),
                     "tests_total": data.get("summary", {}).get("tests_total", 0),
@@ -253,7 +273,15 @@ class ReportHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, directory=str(REPORTS_DIR), **kwargs)
 
+    def _validate_host(self) -> bool:
+        if _is_allowed_host(self.headers.get("Host", "")):
+            return True
+        self.send_error(403, "Invalid Host header")
+        return False
+
     def do_GET(self) -> None:
+        if not self._validate_host():
+            return
         path = unquote(self.path)
         if path == "/":
             self._serve_index()
@@ -270,6 +298,11 @@ class ReportHandler(SimpleHTTPRequestHandler):
             self._serve_html(name)
         else:
             super().do_GET()
+
+    def do_HEAD(self) -> None:
+        if not self._validate_host():
+            return
+        super().do_HEAD()
 
     def _serve_html(self, name: str) -> None:
         if not name.endswith((".html", ".htm")):

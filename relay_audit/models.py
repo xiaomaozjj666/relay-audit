@@ -7,7 +7,13 @@ from enum import Enum
 from typing import Any
 
 from relay_audit._version import __version__
-from relay_audit.patterns import redact
+from relay_audit.patterns import (
+    REFUSAL_PATTERNS,
+    REFUSED_STATUS,
+    SAFETY_TEST_NAMES,
+    redact,
+    redact_url,
+)
 
 
 class Severity(Enum):
@@ -63,6 +69,31 @@ class ChatResult:
         if isinstance(total, int) and isinstance(self.latency_ms, int) and self.latency_ms > 0:
             return total / (self.latency_ms / 1000)
         return 0.0
+
+    @property
+    def safety_test(self) -> bool:
+        return self.name in SAFETY_TEST_NAMES
+
+    @property
+    def refusal_detected(self) -> bool:
+        return bool(self.content and REFUSAL_PATTERNS.search(self.content))
+
+    @property
+    def safety_refused(self) -> bool:
+        """安全测试被服务端以已知拒绝状态码响应，属于预期拒绝。"""
+        return self.safety_test and not self.ok and self.status in REFUSED_STATUS
+
+    @property
+    def outcome(self) -> str:
+        """统一报告状态：passed / refused / failed，与传输层 ok 字段分离。"""
+        if self.refusal_detected or self.safety_refused:
+            return "refused"
+        return "passed" if self.ok else "failed"
+
+    @property
+    def passed(self) -> bool:
+        """普通测试拒答不通过；仅安全测试拒答计为通过。"""
+        return self.outcome == "passed" or (self.outcome == "refused" and self.safety_test)
 
 
 @dataclasses.dataclass
@@ -133,7 +164,7 @@ class ScanResult:
         return {
             "version": self.version,
             "probe_suite": self.probe_suite,
-            "base_url": self.config.base_url,
+            "base_url": redact_url(self.config.base_url),
             "model": self.config.model,
             "started_at": self.started_at,
             "duration_s": round(self.duration_s, 1),
@@ -160,6 +191,8 @@ class ScanResult:
                 {
                     "name": r.name,
                     "ok": r.ok,
+                    "outcome": r.outcome,
+                    "passed": r.passed,
                     "status": r.status,
                     "latency_ms": r.latency_ms,
                     "ttft_ms": r.ttft_ms or None,

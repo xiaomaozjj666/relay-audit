@@ -372,6 +372,37 @@ def test_generate_html_url_escaped() -> None:
     assert "&lt;script&gt;" in html
 
 
+def test_generate_html_escapes_dynamic_category_and_risk(monkeypatch) -> None:
+    payload = 'x"><img src=x onerror=alert(1)>'
+    r = _scan(findings=[Finding(Severity.HIGH, "标题", "详情", category=payload)])
+    monkeypatch.setattr(ScanResult, "risk_level", property(lambda self: payload))
+    html = reporter.generate_html(r)
+
+    assert payload not in html
+    assert "<img src=x onerror=alert(1)>" not in html
+    assert "x&quot;&gt;&lt;img src=x onerror=alert(1)&gt;" in html
+
+
+def test_normal_refusal_is_not_pass_in_html_rich_or_json(capsys) -> None:
+    r = _scan(results=[_r(name="基础对话", ok=False, status=200, content="我不能提供这个内容")])
+    assert reporter.compute_pass_rate(r.results) == (0, 1)
+
+    html = reporter.generate_html(r)
+    assert "0/1 (0%)" in html
+    assert '<tr class="t-fail">' in html
+    assert '<span class="s-refused">拒答</span>' in html
+    assert '<tr class="t-ok">' not in html
+
+    reporter._print_rich(r)
+    terminal = capsys.readouterr().out
+    assert "拒" in terminal
+    assert "通过 0/1" in terminal
+
+    test_data = r.to_dict()["tests"][0]
+    assert test_data["outcome"] == "refused"
+    assert test_data["passed"] is False
+
+
 # ── 保存与清理 ──────────────────────────────────────────────
 
 

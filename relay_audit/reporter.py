@@ -54,19 +54,13 @@ def _is_refused_by_pattern(r: ChatResult) -> bool:
 
 
 def compute_pass_rate(results: list[ChatResult]) -> tuple[int, int]:
-    """计算通过率 (effective_ok, total)。诊断测试不计入分母。
+    """计算通过率 (effective_ok, total)，诊断测试不计入分母。
 
-    拒绝即通过仅对安全类测试生效：普通测试失败时，即使错误文案
-    包含"抱歉/不能"等字样也不计入通过（错误提示 ≠ 模型拒答）。
+    普通测试中的模型拒答不算通过；只有安全测试的拒答属于预期结果。
+    展示层与 JSON 均复用 ChatResult.outcome/passed，避免口径分裂。
     """
     graded = [r for r in results if not _is_diagnostic(r)]
-    total = len(graded)
-    effective_ok = sum(
-        1
-        for r in graded
-        if r.ok or _is_safety_refused(r) or (_is_safety_test(r) and _is_refused_by_pattern(r))
-    )
-    return effective_ok, total
+    return sum(1 for r in graded if r.passed), len(graded)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -203,10 +197,9 @@ def _print_rich(result: ScanResult) -> None:
     rt.add_column("返回模型", max_width=20)
 
     for r in result.results:
-        refused = _is_refused_by_pattern(r)
-        if _is_safety_refused(r):
-            ok_cls = "[yellow]拒[/]"
-        elif refused or r.ok:
+        if r.outcome == "refused":
+            ok_cls = "[yellow]拒[/]" if r.passed else "[red]拒[/]"
+        elif r.passed:
             ok_cls = "[green]✓[/]"
         else:
             ok_cls = "[red]✗[/]"
@@ -409,12 +402,12 @@ def generate_html(result: ScanResult) -> str:
     def _finding_row(f: Finding) -> str:
         sc = f.severity.value
         sv = sev_cn.get(sc, sc)
-        cc = cat_cn.get(f.category, f.category)
+        cc = esc(cat_cn.get(f.category, f.category))
         reason = f" <span class='r'>{esc(f.reason)}</span>" if f.reason else ""
         model_tag = f" <span class='model-tag'>{esc(f.model_name)}</span>" if f.model_name else ""
         return (
             f'<tr class="sev-{sc}">'
-            f'<td><span class="tag tag-{sc}">{sv}</span></td>'
+            f'<td><span class="tag tag-{sc}">{esc(sv)}</span></td>'
             f'<td><span class="cat cat-{esc(f.category)}">{cc}</span></td>'
             f'<td><div class="finding-title">{esc(f.title)}{model_tag}</div>'
             f'<div class="finding-detail">{esc(f.detail)}{reason}</div></td>'
@@ -427,10 +420,10 @@ def generate_html(result: ScanResult) -> str:
     fail_tests = []
     ok_tests = []
     for r in result.results:
-        refused = _is_refused_by_pattern(r)
-        if _is_safety_refused(r) or refused:
-            s_tag, s_cls, row_cls = "拒绝", "refused", "ok"
-        elif r.ok:
+        if r.outcome == "refused":
+            s_tag, s_cls = "拒答", "refused"
+            row_cls = "ok" if r.passed else "fail"
+        elif r.passed:
             s_tag, s_cls, row_cls = "通过", "ok", "ok"
         else:
             s_tag, s_cls, row_cls = "失败", "fail", "fail"
@@ -772,7 +765,7 @@ details[open] summary::before {{ transform: rotate(90deg) }}
 <body>
 
 <div class="summary-bar">
-  <span class="risk-level" style="background:{badge_color}">{risk_cn.get(risk, risk)}</span>
+  <span class="risk-level" style="background:{badge_color}">{esc(risk_cn.get(risk, risk))}</span>
   <div>
     <div class="score-num" style="color:{score_color}">{score_val}</div>
     <div class="score-label">评分</div>
