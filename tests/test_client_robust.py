@@ -149,6 +149,35 @@ def test_parse_chat_response_usage_not_dict() -> None:
     assert r.usage == {}
 
 
+def test_parse_chat_response_rejects_non_string_metadata() -> None:
+    resp = httpx.Response(
+        200,
+        json={
+            "id": ["not", "an", "id"],
+            "model": {"spoofed": "m"},
+            "choices": [{"message": {"content": "ok"}}],
+        },
+    )
+    r = _parse_chat_response("m", 200, resp, 0.1)
+    assert r.ok
+    assert r.raw_id == r.model_ret == ""
+    assert r.verified["model_name_consistent"] is None
+
+
+def test_stream_rejects_non_string_metadata() -> None:
+    def handler(request):
+        body = (
+            b'data: {"id":["bad"],"model":{"spoofed":"m"},'
+            b'"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\n'
+        )
+        return httpx.Response(200, content=body)
+
+    r = _run(_mk_client(handler).chat_stream("m", [{"role": "user", "content": "hi"}]))
+    assert r.ok
+    assert r.raw_id == r.model_ret == ""
+    assert r.verified["model_name_consistent"] is None
+
+
 # ── M2：SSE 解析规范缺陷 ────────────────────────────────────
 
 

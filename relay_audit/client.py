@@ -193,11 +193,13 @@ def _apply_stream_payload(payload: str, state: _StreamState, t0: float) -> None:
     if not isinstance(obj, dict):
         return
     if not state.raw_id:
-        state.raw_id = obj.get("id", "") or ""
+        raw_id = obj.get("id")
+        state.raw_id = raw_id if isinstance(raw_id, str) else ""
     if not state.created:
         state.created = _safe_int(obj.get("created") or 0)
     if not state.model_ret:
-        state.model_ret = obj.get("model", "") or ""
+        model_ret = obj.get("model")
+        state.model_ret = model_ret if isinstance(model_ret, str) else ""
     for c in obj.get("choices") or []:
         if isinstance(c, dict):
             fr = c.get("finish_reason") or ""
@@ -239,10 +241,12 @@ def _parse_chat_response(
         first = choices[0]
     error_field = parsed.get("error") if isinstance(parsed, dict) else None
     if isinstance(parsed, dict):
-        model_ret = parsed.get("model", "") or ""
+        model_value = parsed.get("model")
+        model_ret = model_value if isinstance(model_value, str) else ""
         usage_raw = parsed.get("usage") or {}
         usage = _sanitize_usage(usage_raw) if isinstance(usage_raw, dict) else {}
-        raw_id = parsed.get("id", "") or ""
+        id_value = parsed.get("id")
+        raw_id = id_value if isinstance(id_value, str) else ""
         created = _safe_int(parsed.get("created") or 0)
         if first:
             finish_reason = str(first.get("finish_reason") or "")
